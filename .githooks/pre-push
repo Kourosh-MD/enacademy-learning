@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+while read -r local_ref local_oid remote_ref remote_oid; do
+  if [[ "$remote_ref" == "refs/heads/main" ]]; then
+    echo >&2
+    echo "Direct pushes to main are disabled for ENAcademy." >&2
+    echo "Push a focused branch and open a pull request instead:" >&2
+    echo "  git switch -c codex/<change-name>" >&2
+    echo "  git push --set-upstream origin HEAD" >&2
+    echo "  gh pr create --base main" >&2
+    echo >&2
+    echo "Review and merge the pull request from GitHub." >&2
+    exit 1
+  fi
+done

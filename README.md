@@ -83,4 +83,14 @@ docker compose build
 
 GitHub Actions repeats the backend tests, frontend lint/type/build checks, Compose validation, and production image builds on every pull request.
 
+## Git workflow
+
+Repository changes use branches and pull requests; Codex must never merge its own work. Enable the local guard once after cloning:
+
+```bash
+./scripts/install-git-hooks.sh
+```
+
+The hook blocks direct pushes to `main`. Codex creates a focused branch, opens a pull request, and gives you its GitHub URL. You review the diff and CI results and choose whether to merge it from GitHub.
+
 See [Architecture](docs/architecture.md), [Database guide](docs/database.md), [Security](docs/security.md), and [Contributing](CONTRIBUTING.md) before extending the platform.
