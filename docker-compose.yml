@@ -1,0 +1,85 @@
+name: enacademy-platform
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${DATABASE_NAME:-enacademy}
+      POSTGRES_USER: ${DATABASE_USER:-enacademy}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:-enacademy_dev}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+
+  redis:
+    image: redis:8-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+
+  mailpit:
+    image: axllent/mailpit:v1.27
+    ports:
+      - "8025:8025"
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+
+  backend:
+    build: ./backend
+    environment:
+      DATABASE_URL: jdbc:postgresql://postgres:5432/${DATABASE_NAME:-enacademy}
+      DATABASE_USER: ${DATABASE_USER:-enacademy}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:-enacademy_dev}
+      REDIS_HOST: redis
+      MAIL_HOST: mailpit
+      APP_PUBLIC_URL: ${APP_PUBLIC_URL:-http://localhost:3000}
+      APP_ADMIN_NAME: ${APP_ADMIN_NAME:-ENAcademy Admin}
+      APP_ADMIN_EMAIL: ${APP_ADMIN_EMAIL:-admin@enacademy.local}
+      APP_ADMIN_PASSWORD: ${APP_ADMIN_PASSWORD:-ChangeMe123!}
+      JWT_SECRET: ${JWT_SECRET:-local-development-secret-change-before-production-123456789}
+      APP_COOKIE_SECURE: ${APP_COOKIE_SECURE:-false}
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      mailpit: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/actuator/health/readiness"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 25s
+    ports:
+      - "8080:8080"
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        BACKEND_URL: http://backend:8080
+    environment:
+      BACKEND_URL: http://backend:8080
+      SITE_URL: ${APP_PUBLIC_URL:-http://localhost:3000}
+    depends_on:
+      backend: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "3000:3000"
+
+volumes:
+  postgres_data:
+  redis_data:

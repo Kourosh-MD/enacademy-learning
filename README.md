@@ -1,60 +1,78 @@
 # ENAcademy
 
-ENAcademy is a portfolio-grade, full-stack English learning platform built around practical A1–A2 conversations. It combines a polished public site, durable student progress, account approval, role-specific dashboards, and a complete interactive lesson flow.
+ENAcademy is a production-shaped English learning platform with a complete A1–A2 path, interactive lesson activities, durable learner progress, and an administrator approval workflow.
 
-## Product features
+The public experience has a polished responsive landing page, 3D motion, an about page, and a transparent curriculum. The application layer is a Next.js client backed by a Spring Boot API, PostgreSQL, Redis, and local email delivery through Mailpit.
 
-- Professional responsive landing page with code-native 3D motion
-- Public About and Curriculum experiences
-- ChatGPT-authenticated student and administrator entry points
-- Administrator approval, rejection, and suspension controls
-- Sixteen authored lessons across eight A1–A2 modules
-- Listening with browser speech synthesis
-- Vocabulary study and a persistent saved-word bank
-- Practical grammar explanations and scored knowledge checks
-- Guided speaking with browser speech recognition and phrase matching
-- Durable lesson completion, scores, attempts, and XP in Cloudflare D1
-- Open Graph and X social-preview metadata
+## Run the full platform
 
-## Account workflow
-
-1. A learner signs in and a pending student profile is created.
-2. An email listed in `ADMIN_EMAILS` signs in and receives the administrator role.
-3. The administrator approves the learner from `/admin`.
-4. The learner gains access to lessons and persistent progress.
-
-The local Sites environment uses `seedy@sites.test` as a demonstration administrator.
-
-## Development
-
-Requirements: Node.js 22.13 or newer.
+Requirements: Docker Engine with Docker Compose.
 
 ```bash
-npm install
-cp .env.example .env.local
+cp .env.example .env
+# Replace the development secrets in .env.
+docker compose up --build
+```
+
+Then open:
+
+- Web application: http://localhost:3000
+- API documentation: http://localhost:8080/docs
+- Mailpit inbox: http://localhost:8025
+- Health endpoint: http://localhost:8080/actuator/health
+
+The administrator account comes from `APP_ADMIN_EMAIL` and `APP_ADMIN_PASSWORD`. The values in `.env.example` are placeholders and must be changed outside local development.
+
+## Student workflow
+
+1. A student creates an email/password account.
+2. ENAcademy sends a one-time verification link (visible in Mailpit locally).
+3. The verified profile enters the administrator queue.
+4. An administrator approves, rejects, or suspends the profile.
+5. An approved student completes lessons in order; scores, XP, saved words, and progress persist in PostgreSQL.
+
+## Repository layout
+
+```text
+frontend/   Next.js 16, React 19, TypeScript
+backend/    Spring Boot 4, Java 21, Maven, Flyway
+docs/       Architecture and security decisions
+scripts/    Deterministic curriculum export
+```
+
+The curriculum is authored in `frontend/lib/curriculum.ts`. Run `make curriculum` after editing it to regenerate the backend seed resource.
+
+## Local development
+
+Infrastructure only:
+
+```bash
+docker compose up postgres redis mailpit
+```
+
+Backend:
+
+```bash
+cd backend
+./mvnw spring-boot:run
+```
+
+Frontend:
+
+```bash
+cd frontend
+npm ci
 npm run dev
 ```
 
-Generate migrations after changing `db/schema.ts`:
+## Quality gates
 
 ```bash
-npm run db:generate
+make test
+docker compose config --quiet
+docker compose build
 ```
 
-Validate a production build:
+GitHub Actions repeats the backend tests, frontend lint/type/build checks, Compose validation, and production image builds on every pull request.
 
-```bash
-npm run build
-```
-
-## Project structure
-
-- `app/` — public pages, authenticated product routes, API handlers, and styles
-- `components/` — interactive lesson and administrator controls
-- `db/` — D1 schema and server-side persistence functions
-- `drizzle/` — generated SQLite migrations
-- `lib/curriculum.ts` — the authored A1–A2 curriculum
-
-## Future open-source release
-
-This repository is currently private while the product is being refined. It is intentionally structured for a future public release, including clear setup instructions, portable curriculum data, and platform-managed infrastructure.
+See [Architecture](docs/architecture.md), [Security](docs/security.md), and [Contributing](CONTRIBUTING.md) before extending the platform.
