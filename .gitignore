@@ -4,7 +4,9 @@
 .vscode/
 *.iml
 *.log
+*.dump
 .DS_Store
+backups/
 work/
 frontend/node_modules/
 frontend/.next/

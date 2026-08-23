@@ -9,10 +9,18 @@ The public experience has a polished responsive landing page, 3D motion, an abou
 Requirements: Docker Engine with Docker Compose.
 
 ```bash
-cp .env.example .env
-# Replace the development secrets in .env.
-docker compose up --build
+./start-app.sh
 ```
+
+The script builds the images, starts every service in the background, and waits for the stack to become healthy. Without a `.env` file it uses the local-only defaults in `docker-compose.yml`. To customize credentials, copy `.env.example` to `.env` before starting; replace every placeholder before deployment.
+
+To stop the application without deleting learner data:
+
+```bash
+./stop-app.sh
+```
+
+The equivalent manual workflow is `docker compose up --build --detach --wait` and `docker compose down`.
 
 Then open:
 
@@ -75,4 +83,4 @@ docker compose build
 
 GitHub Actions repeats the backend tests, frontend lint/type/build checks, Compose validation, and production image builds on every pull request.
 
-See [Architecture](docs/architecture.md), [Security](docs/security.md), and [Contributing](CONTRIBUTING.md) before extending the platform.
+See [Architecture](docs/architecture.md), [Database guide](docs/database.md), [Security](docs/security.md), and [Contributing](CONTRIBUTING.md) before extending the platform.

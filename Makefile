@@ -1,10 +1,10 @@
 .PHONY: up down logs test build curriculum
 
 up:
-	docker compose up --build
+	./start-app.sh
 
 down:
-	docker compose down
+	./stop-app.sh
 
 logs:
 	docker compose logs -f backend frontend
