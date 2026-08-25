@@ -100,16 +100,18 @@ The beta checkout deliberately does not connect to a bank or payment gateway:
 
 1. An approved student chooses one or more active products.
 2. Spring validates product availability and confirms that the student does not already own them.
-3. One PostgreSQL transaction inserts the approved order, immutable item snapshots, invoice metadata, and product entitlements.
+3. One PostgreSQL transaction inserts the approved order, immutable item snapshots, exactly one uniquely numbered invoice, and product entitlements.
 4. A course entitlement matches the purchased A1 or A2 level and becomes part of the lesson unlock rule.
 5. A book entitlement authorizes the protected PDF download endpoint.
-6. Persian invoice PDF bytes are rendered on demand from durable order data.
+6. Persian invoice PDF bytes are rendered on demand from the durable item names, quantities, unit prices, line totals, final total, and invoice issue date.
 
 Money is stored as whole toman in `BIGINT` columns. No card number, bank token, gateway response, or other payment credential exists in the schema.
 
 Invoice PDFs are not stored in PostgreSQL. The database stores their immutable source data and the backend regenerates the Persian PDF on demand with embedded fonts, Persian digits, and a Jalali issue date. Demo book files live in `backend/src/main/resources/books` and are packaged inside the Spring application image; ownership remains in PostgreSQL.
 
 The `purchase_order_items` title and price snapshots preserve what the student bought even if an administrator later changes the catalog title, price, or active flag. Orders and invoices use restrictive foreign keys so accidental product or user deletion cannot destroy commercial history.
+
+One checkout is one purchase order and one invoice. A checkout containing multiple products produces one invoice with multiple item rows; a later checkout produces a new invoice number and issue timestamp. The unique constraint on `invoices.order_id` enforces that one-to-one relationship.
 
 ## Migrations
 

@@ -337,6 +337,51 @@ There is no bank redirect and no real payment. The transaction is approved immed
 
 Course entitlement is checked together with same-level lesson sequence. Buying A2 therefore unlocks its first lesson without requiring A1, while later A2 lessons still require earlier A2 completion. Book files are application resources, but the download route returns them only after an ownership check.
 
+#### Purchase-to-invoice sequence
+
+~~~mermaid
+sequenceDiagram
+    actor Student
+    participant Web as Next.js Store
+    participant API as Spring CommerceService
+    participant DB as PostgreSQL
+    participant PDF as InvoicePdfService
+
+    Student->>Web: Confirm one checkout
+    Web->>API: POST /store/purchases with product IDs
+    API->>DB: Validate active products and ownership
+    DB-->>API: Current product names and toman prices
+    API->>DB: Begin transaction
+    API->>DB: Insert one approved purchase_order
+    API->>DB: Insert one immutable item snapshot per product
+    API->>DB: Insert one uniquely numbered invoice
+    API->>DB: Insert course/book entitlements
+    API->>DB: Commit transaction
+    API-->>Web: Order, invoice ID/number, item names, date, and totals
+    Web-->>Student: Show purchase success and invoice action
+    Student->>Web: Download this invoice
+    Web->>API: GET /store/invoices/{invoiceId}/pdf
+    API->>DB: Verify ownership and load invoice source data
+    DB-->>API: Buyer, issue date, item snapshots, and totals
+    API->>PDF: Render Persian A4 invoice
+    PDF-->>Student: Protected PDF download
+~~~
+
+Each checkout is one purchase and creates exactly one invoice in the same database transaction. A later checkout creates a different order, invoice ID, invoice number, and issue date. When one checkout contains multiple products, its single invoice contains one line for every purchased product.
+
+| Invoice content | Durable source | PDF presentation |
+|---|---|---|
+| Invoice identity | `invoices.invoice_number` | Unique `ENA-######` number |
+| Purchase date | `invoices.issued_at` | Persian digits and Jalali date |
+| Purchased item name | `purchase_order_items.title_fa` | One Persian line per purchased item |
+| Quantity | `purchase_order_items.quantity` | Quantity column |
+| Unit price | `purchase_order_items.unit_price_toman` | Formatted toman amount |
+| Item total | `purchase_order_items.line_total_toman` | Per-line total |
+| Purchase total | `purchase_orders.total_toman` | Final payable total |
+| Customer | User name and email joined through the order | Buyer information section |
+
+The item name and price are copied into immutable order-item snapshots at checkout. A later catalog edit therefore cannot rewrite an older invoice. PostgreSQL enforces `invoices.order_id` as unique, while the service creates the order, invoice, item snapshots, and entitlements atomically; a failure rolls back the complete purchase instead of leaving a partial invoice or partial access grant.
+
 ## 6. Authentication and authorization
 
 ### Passwords
