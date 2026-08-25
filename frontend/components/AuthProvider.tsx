@@ -8,6 +8,7 @@ export type SessionUser = {
 };
 type AuthResponse = { accessToken: string; expiresIn: number; user: SessionUser };
 type ApiProblem = { detail?: string; code?: string; errors?: Record<string,string> };
+export type ApiError = Error & { code?: string; errors?: Record<string,string> };
 type AuthContextValue = {
   user: SessionUser | null; loading: boolean;
   login(email:string,password:string): Promise<void>;
@@ -19,10 +20,10 @@ type AuthContextValue = {
 const AuthContext=createContext<AuthContextValue|null>(null);
 let accessToken: string | null = null;
 
-async function parseProblem(response:Response):Promise<Error & {code?:string}> {
+async function parseProblem(response:Response):Promise<ApiError> {
   const problem=await response.json().catch(()=>({})) as ApiProblem;
-  const error=new Error(problem.detail||'Something went wrong. Please try again.') as Error & {code?:string};
-  error.code=problem.code; return error;
+  const error=new Error(problem.detail||'Something went wrong. Please try again.') as ApiError;
+  error.code=problem.code; error.errors=problem.errors; return error;
 }
 
 export function AuthProvider({children}:{children:React.ReactNode}) {
