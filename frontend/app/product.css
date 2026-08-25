@@ -121,3 +121,49 @@
 @media(max-width:620px){.public-footer,.about-hero,.about-manifesto,.principle-grid,.open-source-story,.about-cta,.curriculum-hero,.curriculum-levels,.curriculum-cta{width:calc(100% - 28px)}.about-hero{padding:65px 0}.about-hero h1,.curriculum-hero h1{font-size:48px;letter-spacing:-3px}.about-manifesto{padding:30px 24px;grid-template-columns:1fr}.about-manifesto>div:last-child{grid-column:1}.principle-grid{margin-bottom:80px}.course-metrics{grid-template-columns:1fr 1fr}.course-metrics div{padding:13px;border-bottom:1px solid var(--line)}.level-block{padding:25px 18px}.level-block>header{grid-template-columns:55px 1fr}.level-block>header>span{width:52px;height:52px;border-radius:16px}.level-block h2{font-size:22px}.module-list article{grid-template-columns:35px 1fr}.module-list article>b{grid-column:2}.curriculum-cta{padding:35px 25px;align-items:start;flex-direction:column;gap:25px}.curriculum-cta h2{font-size:31px}.role-grid{width:calc(100% - 28px)}.role-card{padding:28px}.dash-main,.admin-main{padding:30px 14px 65px}.dash-top{align-items:start}.dash-top-stats{display:none}.continue-card{padding:28px 22px;grid-template-columns:1fr}.continue-card h2{font-size:31px}.continue-visual{display:none}.dashboard-modules{grid-template-columns:1fr}.skill-overview{grid-template-columns:1fr}.admin-stats{grid-template-columns:1fr 1fr}.admin-table article{grid-template-columns:auto 1fr}.admin-table time,.admin-table .status-pill,.admin-row-actions{grid-column:2}.lesson-header{padding:0 14px;gap:12px}.lesson-canvas{padding:14px}.lesson-panel{padding:30px 17px}.lesson-panel>h1{font-size:29px}.lesson-word-grid{grid-template-columns:1fr}.lesson-footer{padding:0 14px}.reward-cards{grid-template-columns:1fr 1fr}.reward-cards div:last-child{grid-column:1/-1}.status-page h1{font-size:38px}.status-steps>i{width:25px}}
 @media(max-width:620px){.method-section,.home-curriculum,.roles-section,.home-about,.final-cta{width:calc(100% - 28px);margin-block:90px}.section-intro h2,.showcase-copy h2,.roles-section h2{font-size:39px;letter-spacing:-1.8px}.method-steps article{min-height:300px}.product-showcase{width:calc(100% - 28px);margin:100px auto;padding:42px 20px}.dashboard-preview{min-height:390px;grid-template-columns:50px 1fr;transform:none}.dashboard-preview>aside{padding:17px 8px}.preview-main{padding:20px 13px}.preview-orb{right:15px;top:65px;width:85px;height:85px;font-size:23px}.preview-main article strong{max-width:150px;font-size:19px}.level-cards article{grid-template-columns:52px 1fr}.level-cards article>span{width:50px;height:50px;border-radius:15px;font-size:18px}.level-cards article>i{display:none}.roles-section{gap:20px}.roles-visual{min-height:390px}.role-ring{inset:35px}.approval-card{width:90%}.home-about blockquote{font-size:40px}.final-cta{padding:75px 20px}.final-cta h2{font-size:58px;letter-spacing:-3px}.public-footer{width:calc(100% - 28px)}}
 @media(max-width:800px){.auth-workspace{grid-template-columns:1fr}.auth-form-card,.auth-process-card{padding:30px}.auth-intro{padding-top:55px}.auth-intro h1{font-size:48px}}
+
+/* Theme system */
+.product-showcase,.final-cta,.about-manifesto,.curriculum-cta,.auth-process-card{background:var(--deep)}
+.preview-main>article,.continue-card{background:linear-gradient(135deg,color-mix(in srgb,var(--mint) 58%,var(--deep)),var(--deep))}
+.grammar-focus{background:color-mix(in srgb,var(--mint) 28%,var(--deep))}
+html[data-theme="dark"] :is(.inner-page,.auth-page,.dashboard-shell,.lesson-shell){background:var(--paper);color:var(--ink)}
+html[data-theme="dark"] :is(.principle-grid article,.course-metrics,.level-block,.module-copy>div span,.auth-workspace,.auth-form-card,.auth-tabs button.active,.auth-form-card input,.dash-sidebar,.dash-top-stats span,.dashboard-modules article,.skill-overview article,.lesson-header,.lesson-steps,.lesson-panel,.quiz-options button,.lesson-footer,.level-cards article,.method-steps article,.signal-strip,.approval-card,.approval-actions button,.dashboard-preview,.dashboard-preview>aside,.preview-cards i){background:var(--panel);color:var(--ink)}
+html[data-theme="dark"] :is(.module-list article,.auth-tabs,.dialogue-stack article>div,.lesson-word-grid article,.quiz-options button b,.speech-result,.reward-cards div,.module-progress){background:var(--panel-soft)}
+html[data-theme="dark"] :is(.floating-word,.signal-card,.streak-chip,.eyebrow-pill,.button-ghost){background:color-mix(in srgb,var(--panel) 82%,transparent);border-color:var(--line);color:var(--ink)}
+html[data-theme="dark"] .roles-visual{background:radial-gradient(circle,color-mix(in srgb,var(--mint) 14%,transparent),color-mix(in srgb,var(--panel) 65%,transparent) 45%,transparent 68%)}
+html[data-theme="dark"] .about-cta{background:linear-gradient(135deg,color-mix(in srgb,var(--mint) 13%,var(--panel)),color-mix(in srgb,var(--lime) 8%,var(--panel)))}
+html[data-theme="dark"] .auth-workspace{box-shadow:0 30px 90px rgba(0,0,0,.28)}
+html[data-theme="dark"] .auth-process-card{background:var(--deep)}
+html[data-theme="dark"] .lesson-steps button.active{background:color-mix(in srgb,var(--mint) 13%,var(--panel))}
+html[data-theme="dark"] .lesson-word-grid article>div span,html[data-theme="dark"] .prompt-listen,html[data-theme="dark"] .principle-grid article>span,html[data-theme="dark"] .module-index,html[data-theme="dark"] .dashboard-modules article>span,html[data-theme="dark"] .role-points>div>span{background:color-mix(in srgb,var(--mint) 14%,var(--panel))}
+html[data-theme="dark"] .learning-tip{border-color:color-mix(in srgb,var(--amber) 38%,var(--line));background:color-mix(in srgb,var(--amber) 9%,var(--panel))}
+html[data-theme="dark"] .quiz-options button.correct{background:color-mix(in srgb,#35a36e 18%,var(--panel))}html[data-theme="dark"] .quiz-options button.wrong{background:color-mix(in srgb,#d95750 15%,var(--panel))}
+html[data-theme="dark"] .wordmark-glyph{background:var(--mint-dark);color:var(--paper)}
+html[data-theme="dark"] .dashboard-preview>aside i,html[data-theme="dark"] .preview-main>header :is(span,i){background:#31433c}
+html[data-theme="dark"] .home-about blockquote{color:var(--ink)}
+
+/* The admin console follows the selected light mode too. */
+html[data-theme="light"] .admin-shell{color:var(--ink);background:#eef3ef}
+html[data-theme="light"] .admin-sidebar{border-color:var(--line);background:#fff}
+html[data-theme="light"] .admin-sidebar .wordmark{color:var(--ink)}
+html[data-theme="light"] .admin-sidebar nav a{color:var(--muted)}
+html[data-theme="light"] .admin-sidebar nav a.active,html[data-theme="light"] .admin-sidebar nav a:hover{color:var(--mint-dark);background:#e2f6ed}
+html[data-theme="light"] .admin-main header p:last-child,html[data-theme="light"] .admin-stats small,html[data-theme="light"] .admin-table small,html[data-theme="light"] .admin-signout{color:var(--muted)}
+html[data-theme="light"] .admin-stats article,html[data-theme="light"] .admin-table-section{border-color:var(--line);background:#fff}
+html[data-theme="light"] .admin-stats article>span{color:var(--mint-dark);background:#e2f6ed}
+html[data-theme="light"] .admin-table article{border-color:var(--line)}
+html[data-theme="light"] .admin-row-actions button{border-color:var(--line);color:var(--muted)}
+
+/* RTL polish: layouts mirror while lesson content remains readable. */
+html[dir="rtl"] :is(.about-hero,.about-manifesto,.open-source-story,.module-list article,.dashboard-modules article,.admin-table article,.lesson-header){text-align:right}
+html[dir="rtl"] :is(.dash-sidebar nav a,.lesson-steps button,.quiz-options button){text-align:right}
+html[dir="rtl"] .dash-sidebar{border-right:0;border-left:1px solid var(--line)}
+html[dir="rtl"] .lesson-steps{border-right:0;border-left:1px solid var(--line)}
+html[dir="rtl"] .admin-sidebar{border-right:0;border-left:1px solid rgba(255,255,255,.08)}
+html[dir="rtl"] .admin-sidebar nav b{margin-left:0;margin-right:auto}
+html[dir="rtl"] .dialogue-stack article button{right:auto;left:12px}
+html[dir="rtl"] .dialogue-stack article>div{padding-right:15px;padding-left:50px}
+html[dir="rtl"] .speech-result{text-align:right}
+html[dir="rtl"] :is(.dialogue-stack,.lesson-word-grid,.grammar-focus,.example-list,.quiz-options,.speaking-practice blockquote){direction:ltr;text-align:left}
+html[dir="rtl"] .lesson-panel>h1{text-align:center;direction:rtl}
+html[dir="rtl"] .public-footer>div:not(:first-child) strong,html[dir="rtl"] .course-metrics span,html[dir="rtl"] .admin-stats small{text-transform:none;letter-spacing:0}

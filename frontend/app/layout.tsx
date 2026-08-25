@@ -1,18 +1,8 @@
 import type { Metadata } from 'next';
-import { Geist, Geist_Mono } from 'next/font/google';
 import './globals.css';
 import './product.css';
 import { AuthProvider } from '@/components/AuthProvider';
-
-const geistSans = Geist({
-  variable: '--font-geist-sans',
-  subsets: ['latin'],
-});
-
-const geistMono = Geist_Mono({
-  variable: '--font-geist-mono',
-  subsets: ['latin'],
-});
+import { PreferenceControls, PreferencesProvider } from '@/components/PreferencesProvider';
 
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.SITE_URL ?? 'http://localhost:3000'),
@@ -40,11 +30,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-      >
-        <AuthProvider>{children}</AuthProvider>
+    <html lang="en" dir="ltr" data-theme="light" data-accent="emerald" suppressHydrationWarning>
+      <head><script dangerouslySetInnerHTML={{__html:`try{const p=JSON.parse(localStorage.getItem('enacademy.preferences')||'{}');const r=document.documentElement;if(p.locale==='fa'){r.lang='fa';r.dir='rtl'}if(p.mode==='dark')r.dataset.theme='dark';if(['emerald','ocean','violet','sunset','rose'].includes(p.accent))r.dataset.accent=p.accent}catch{}`}} /></head>
+      <body>
+        <PreferencesProvider><AuthProvider>{children}</AuthProvider><PreferenceControls /></PreferencesProvider>
       </body>
     </html>
   );
