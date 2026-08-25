@@ -1,6 +1,7 @@
 'use client';
 
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { usePathname } from 'next/navigation';
 import { Locale, translate } from '@/lib/i18n';
 
 export type ColorMode = 'light' | 'dark';
@@ -58,8 +59,10 @@ export function usePreferences() {
 
 export function PreferenceControls() {
   const { locale, mode, accent, setLocale, setMode, setAccent, t } = usePreferences();
+  const pathname = usePathname();
   const [paletteOpen, setPaletteOpen] = useState(false);
-  return <div className="preference-dock" dir="ltr" aria-label="Display preferences">
+  const lessonMode = pathname.startsWith('/learn/');
+  return <div className={`preference-dock${lessonMode ? ' preference-dock-lesson' : ''}`} dir="ltr" aria-label="Display preferences">
     <button className="preference-button language-button" onClick={() => setLocale(locale === 'en' ? 'fa' : 'en')} title={t('prefs.language')} aria-label={t('prefs.language')}>
       <span>{locale === 'en' ? 'فا' : 'EN'}</span>
     </button>
