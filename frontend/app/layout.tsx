@@ -1,8 +1,12 @@
 import type { Metadata } from 'next';
+import { Manrope, Vazirmatn } from 'next/font/google';
 import './globals.css';
 import './product.css';
 import { AuthProvider } from '@/components/AuthProvider';
 import { PreferenceControls, PreferencesProvider } from '@/components/PreferencesProvider';
+
+const manrope = Manrope({ subsets: ['latin'], variable: '--font-latin', display: 'swap' });
+const vazirmatn = Vazirmatn({ subsets: ['arabic'], variable: '--font-persian', display: 'swap' });
 
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.SITE_URL ?? 'http://localhost:3000'),
@@ -30,7 +34,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" dir="ltr" data-theme="light" data-accent="emerald" suppressHydrationWarning>
+    <html lang="en" dir="ltr" data-theme="light" data-accent="emerald" className={`${manrope.variable} ${vazirmatn.variable}`} suppressHydrationWarning>
       <head><script dangerouslySetInnerHTML={{__html:`try{const p=JSON.parse(localStorage.getItem('enacademy.preferences')||'{}');const r=document.documentElement;if(p.locale==='fa'){r.lang='fa';r.dir='rtl'}if(p.mode==='dark')r.dataset.theme='dark';if(['emerald','ocean','violet','sunset','rose'].includes(p.accent))r.dataset.accent=p.accent}catch{}`}} /></head>
       <body>
         <PreferencesProvider><AuthProvider>{children}</AuthProvider><PreferenceControls /></PreferencesProvider>
