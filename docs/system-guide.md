@@ -84,6 +84,10 @@ The platform is more than a visual demonstration. Accounts, verification tokens,
 - Knowledge checks with feedback.
 - Browser speech practice where supported.
 - Durable completion, best score, XP, and saved vocabulary.
+- Bilingual course and book store with product previews.
+- Immediate simulated checkout with no real payment gateway.
+- Automatic purchased-course unlock and protected book downloads.
+- Purchase history and downloadable Persian PDF invoices.
 
 ### Administrator experience
 
@@ -94,6 +98,7 @@ The platform is more than a visual demonstration. Accounts, verification tokens,
 - Approve, reject, and suspend actions.
 - Prevention of approval before email verification.
 - Audit events for sensitive actions.
+- Commerce control center for pricing, availability, orders, entitlements, and invoice downloads.
 
 ### Engineering and operations
 
@@ -310,6 +315,28 @@ The unlock rule runs when content is requested and again when completion is subm
 
 ---
 
+### 5.6 Beta purchase, entitlement, and invoice
+
+~~~mermaid
+flowchart TD
+    Browse[Approved student opens Store] --> Preview[Preview course or book]
+    Preview --> Approve[Approve beta purchase]
+    Approve --> Validate{Active and not already owned?}
+    Validate -- No --> Conflict[Reject safely]
+    Validate -- Yes --> Transaction[Single PostgreSQL transaction]
+    Transaction --> Order[Approved order and item snapshots]
+    Transaction --> Invoice[Invoice number and issue time]
+    Transaction --> Entitlement[Durable product entitlement]
+    Entitlement --> Course{Product type}
+    Course -- Course --> Unlock[Unlock purchased A1 or A2 level]
+    Course -- Book --> Download[Authorize protected PDF]
+    Invoice --> Render[Generate Persian PDF on demand]
+~~~
+
+There is no bank redirect and no real payment. The transaction is approved immediately, uses whole toman values, and records no payment credentials. The invoice is explicitly labeled آزمایشی, uses Persian digits and a Jalali date, and is not represented as a tax invoice or bank receipt.
+
+Course entitlement is checked together with same-level lesson sequence. Buying A2 therefore unlocks its first lesson without requiring A1, while later A2 lessons still require earlier A2 completion. Book files are application resources, but the download route returns them only after an ownership check.
+
 ## 6. Authentication and authorization
 
 ### Passwords
@@ -424,6 +451,12 @@ erDiagram
     USERS ||--o{ LESSON_PROGRESS : completes
     USERS ||--o{ SAVED_WORDS : saves
     USERS o|--o{ AUDIT_EVENTS : acts_in
+    USERS ||--o{ PURCHASE_ORDERS : places
+    PURCHASE_ORDERS ||--|{ PURCHASE_ORDER_ITEMS : contains
+    PURCHASE_ORDERS ||--|| INVOICES : generates
+    USERS ||--o{ PRODUCT_ENTITLEMENTS : owns
+    PRODUCTS ||--o{ PURCHASE_ORDER_ITEMS : snapshots
+    PRODUCTS ||--o{ PRODUCT_ENTITLEMENTS : grants
     COURSE_MODULES ||--o{ LESSONS : contains
     LESSONS ||--o{ LESSON_PROGRESS : records
 
@@ -494,6 +527,11 @@ erDiagram
 | lessons | Lesson metadata and activities | Module FK, JSONB content, order index |
 | lesson_progress | Per-user lesson result | Unique user/lesson, score 0–100 |
 | saved_words | Vocabulary bank | Unique user/word |
+| products | Bilingual beta catalog and delivery target | Type/target checks, unique slug, nonnegative toman price |
+| purchase_orders | Approved order header and totals | User FK, constrained status/currency |
+| purchase_order_items | Immutable purchased product snapshots | Order/product FKs and positive quantities |
+| invoices | Invoice identity and issue time | Unique order and number |
+| product_entitlements | Course/book ownership | Unique user/product and granting order |
 | audit_events | Security and product history | Actor reference and JSONB details |
 
 ### Why relational columns plus JSONB
@@ -547,6 +585,19 @@ Base path: /api/v1
 | GET | /admin/students | Metrics and student list |
 | PATCH | /admin/students/{id}/status | Change student status |
 | GET | /admin/audit | Latest 50 audit records |
+| GET | /admin/commerce | Commerce metrics, catalog, and recent orders |
+| PATCH | /admin/commerce/products/{id} | Change beta price or availability |
+| GET | /admin/commerce/invoices/{id}/pdf | Download any customer invoice |
+
+### Store and purchases
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | /store/products | Active catalog plus ownership state |
+| POST | /store/purchases | Approve beta order and grant access |
+| GET | /store/purchases | Student order and invoice history |
+| GET | /store/invoices/{id}/pdf | Download owned Persian invoice |
+| GET | /store/books/{productId}/download | Download an owned book |
 
 ### Error contract
 
@@ -565,9 +616,12 @@ The backend uses ProblemDetail responses with HTTP status, stable code, detail, 
 | /curriculum | Public | A1–A2 path |
 | /login | Public | Registration and sign-in |
 | /verify | Public | Verification result |
-| /dashboard | Approved user | Learning overview |
-| /learn/[lessonId] | Approved user | Lesson player |
+| /dashboard | Approved student | Purchased learning overview |
+| /store | Approved student | Course/book previews and beta checkout |
+| /purchases | Approved student | Purchases, downloads, and invoice tabs |
+| /learn/[lessonId] | Entitled student | Lesson player |
 | /admin | Administrator | Student management |
+| /admin/commerce | Administrator | Products, orders, access, and invoices |
 
 ### Session provider
 
@@ -976,7 +1030,7 @@ Never commit real environment files, secrets, backups, or database exports.
 - No password reset or email-change flow.
 - No verification-email resend endpoint.
 - No MFA.
-- No payments, certificates, instructor role, or organizations.
+- No real payment gateway, refunds, tax integration, certificates, instructor role, or organizations. Beta orders are approved immediately.
 - No content-management UI.
 - No approval notification.
 - No admin pagination, search, or bulk actions.
@@ -1063,12 +1117,15 @@ ENAcademy/
 │   │   ├── auth/                    Identity and sessions
 │   │   ├── admin/                   Approval and audit access
 │   │   ├── learning/                Curriculum and progress
+│   │   ├── commerce/                Products, orders, access, and Persian invoices
 │   │   ├── config/                  Security and startup seeders
 │   │   ├── domain/                  User model
 │   │   └── shared/                  Errors and auditing
 │   ├── src/main/resources/
 │   │   ├── application.yml          Runtime configuration
 │   │   ├── curriculum.json          Backend seed
+│   │   ├── books/                    Protected demo PDF books
+│   │   ├── fonts/                    Embedded invoice fonts
 │   │   └── db/migration/            Flyway SQL
 │   └── Dockerfile
 ├── docs/

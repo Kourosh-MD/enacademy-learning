@@ -1,8 +1,8 @@
 # ENAcademy
 
-ENAcademy is a production-shaped English learning platform with a complete A1–A2 path, interactive lesson activities, durable learner progress, and an administrator approval workflow.
+ENAcademy is a production-shaped English learning platform with a complete A1–A2 path, interactive lesson activities, durable learner progress, an administrator approval workflow, and a beta digital store for courses and books.
 
-The public experience has a polished responsive landing page, 3D motion, an about page, and a transparent curriculum. The application layer is a Next.js client backed by a Spring Boot API, PostgreSQL, Redis, and local email delivery through Mailpit.
+The public experience has a polished responsive landing page, 3D motion, an about page, and a transparent curriculum. Approved students can preview products, make an instantly approved beta purchase in toman, unlock course levels, download purchased books, and obtain a Persian PDF invoice. No real payment gateway or banking data is used. The application layer is a Next.js client backed by a Spring Boot API, PostgreSQL, Redis, and local email delivery through Mailpit.
 
 ## Run the full platform
 
@@ -37,7 +37,9 @@ The administrator account comes from `APP_ADMIN_EMAIL` and `APP_ADMIN_PASSWORD`.
 2. ENAcademy sends a one-time verification link (visible in Mailpit locally).
 3. The verified profile enters the administrator queue.
 4. An administrator approves, rejects, or suspends the profile.
-5. An approved student completes lessons in order; scores, XP, saved words, and progress persist in PostgreSQL.
+5. The approved student previews a course or book in Store and confirms the clearly marked beta purchase.
+6. ENAcademy immediately approves the order: a course unlocks its level, while a book becomes available as a protected download.
+7. The student downloads a Persian PDF invoice from Purchases; orders, invoice records, entitlements, scores, XP, saved words, and progress persist in PostgreSQL.
 
 ## Repository layout
 
@@ -45,7 +47,7 @@ The administrator account comes from `APP_ADMIN_EMAIL` and `APP_ADMIN_PASSWORD`.
 frontend/   Next.js 16, React 19, TypeScript
 backend/    Spring Boot 4, Java 21, Maven, Flyway
 docs/       Architecture and security decisions
-scripts/    Deterministic curriculum export
+scripts/    Curriculum export and deterministic demo-book PDF generation
 ```
 
 The curriculum is authored in `frontend/lib/curriculum.ts`. Run `make curriculum` after editing it to regenerate the backend seed resource.

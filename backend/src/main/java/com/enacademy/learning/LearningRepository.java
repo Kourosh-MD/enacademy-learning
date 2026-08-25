@@ -49,13 +49,28 @@ public class LearningRepository {
 
     public boolean isUnlocked(UUID userId, String slug) {
         return jdbc.sql("""
-            SELECT NOT EXISTS (
+            SELECT EXISTS (
+              SELECT 1 FROM lessons current
+              JOIN products product ON product.product_type='COURSE' AND product.target_key=current.level
+              JOIN product_entitlements entitlement ON entitlement.product_id=product.id AND entitlement.user_id=:user
+              WHERE current.slug=:slug
+            ) AND NOT EXISTS (
               SELECT 1 FROM lessons earlier
               JOIN lessons current ON current.slug=:slug
-              LEFT JOIN lesson_progress p ON p.lesson_slug=earlier.slug AND p.user_id=:user AND p.completed=true
-              WHERE earlier.position < current.position AND p.id IS NULL
+              LEFT JOIN lesson_progress progress
+                ON progress.lesson_slug=earlier.slug AND progress.user_id=:user AND progress.completed=true
+              WHERE earlier.level=current.level AND earlier.position < current.position AND progress.id IS NULL
             )
             """).param("slug",slug).param("user",userId).query(Boolean.class).single();
+    }
+
+    public List<String> unlockedCourseLevels(UUID userId) {
+        return jdbc.sql("""
+            SELECT DISTINCT product.target_key FROM products product
+            JOIN product_entitlements entitlement ON entitlement.product_id=product.id
+            WHERE entitlement.user_id=:user AND product.product_type='COURSE'
+            ORDER BY product.target_key
+            """).param("user",userId).query(String.class).list();
     }
 
     public void complete(UUID userId, String slug, int score, int xp) {

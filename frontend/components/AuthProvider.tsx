@@ -15,6 +15,7 @@ type AuthContextValue = {
   register(fullName:string,email:string,password:string): Promise<string>;
   logout(): Promise<void>;
   apiFetch<T>(path:string,init?:RequestInit): Promise<T>;
+  apiDownload(path:string): Promise<Blob>;
 };
 
 const AuthContext=createContext<AuthContextValue|null>(null);
@@ -47,6 +48,15 @@ export function AuthProvider({children}:{children:React.ReactNode}) {
     return response.json() as Promise<T>;
   },[refresh]);
 
+
+  const apiDownload=useCallback(async(path:string):Promise<Blob>=>{
+    const send=()=>fetch(path,{credentials:'include',headers:{...(accessToken?{Authorization:`Bearer ${accessToken}`}:{})}});
+    let response=await send();
+    if(response.status===401&&await refresh()) response=await send();
+    if(!response.ok) throw await parseProblem(response);
+    return response.blob();
+  },[refresh]);
+
   const login=useCallback(async(email:string,password:string)=>{
     const response=await fetch('/api/v1/auth/login',{method:'POST',credentials:'include',headers:{'content-type':'application/json'},body:JSON.stringify({email,password})});
     if(!response.ok) throw await parseProblem(response);
@@ -58,7 +68,7 @@ export function AuthProvider({children}:{children:React.ReactNode}) {
     return ((await response.json()) as {message:string}).message;
   },[]);
   const logout=useCallback(async()=>{await fetch('/api/v1/auth/logout',{method:'POST',credentials:'include'});accessToken=null;setUser(null);},[]);
-  const value=useMemo(()=>({user,loading,login,register,logout,apiFetch}),[user,loading,login,register,logout,apiFetch]);
+  const value=useMemo(()=>({user,loading,login,register,logout,apiFetch,apiDownload}),[user,loading,login,register,logout,apiFetch,apiDownload]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

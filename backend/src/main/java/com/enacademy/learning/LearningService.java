@@ -23,7 +23,7 @@ public class LearningService {
     public record LessonView(LearningRepository.LessonSummary lesson, JsonNode content, boolean unlocked) {}
     public record DashboardView(com.enacademy.auth.AuthModels.UserView user,
                                 List<LearningRepository.ProgressRow> progress,List<String> savedWords,
-                                int totalXp,int completedLessons,int totalLessons) {}
+                                int totalXp,int completedLessons,int totalLessons,List<String> unlockedCourseLevels) {}
     public record CompleteRequest(@Min(0) @Max(100) int score) {}
     public record WordRequest(@NotBlank @Size(max=100) String word, boolean save) {}
 
@@ -44,7 +44,8 @@ public class LearningService {
         int total=curriculum().lessonCount();
         return new DashboardView(com.enacademy.auth.AuthModels.UserView.from(user),progress,learning.savedWords(user.id()),
             progress.stream().mapToInt(LearningRepository.ProgressRow::xpEarned).sum(),
-            (int)progress.stream().filter(LearningRepository.ProgressRow::completed).count(),total);
+            (int)progress.stream().filter(LearningRepository.ProgressRow::completed).count(),total,
+            learning.unlockedCourseLevels(user.id()));
     }
 
     public LessonView lesson(String subject,String slug) {
@@ -57,7 +58,7 @@ public class LearningService {
     public DashboardView complete(String subject,String slug,int score) {
         var user=requireApproved(subject);
         var lesson=learning.lesson(slug).orElseThrow(()->new ApiException(HttpStatus.NOT_FOUND,"LESSON_NOT_FOUND","Lesson not found."));
-        if(!learning.isUnlocked(user.id(),slug)) throw new ApiException(HttpStatus.CONFLICT,"LESSON_LOCKED","Complete the earlier lessons first.");
+        if(!learning.isUnlocked(user.id(),slug)) throw new ApiException(HttpStatus.CONFLICT,"LESSON_LOCKED","Purchase this course and complete its earlier lessons first.");
         learning.complete(user.id(),slug,score,lesson.summary().xp());
         audit.record(user.id(),"LESSON_COMPLETED","LESSON",slug,Map.of("score",score,"xp",lesson.summary().xp()));
         return dashboard(subject);

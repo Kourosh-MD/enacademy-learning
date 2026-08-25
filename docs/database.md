@@ -8,7 +8,7 @@ Docker Compose stores PostgreSQL and Redis data in named Docker volumes:
 
 | Service | Compose volume | Path inside the container | Purpose |
 | --- | --- | --- | --- |
-| PostgreSQL | `enacademy-platform_postgres_data` | `/var/lib/postgresql/data` | Accounts, tokens, curriculum, progress, saved words, and audit history |
+| PostgreSQL | `enacademy-platform_postgres_data` | `/var/lib/postgresql/data` | Accounts, tokens, curriculum, progress, products, approved beta orders, entitlements, invoices, saved words, and audit history |
 | Redis | `enacademy-platform_redis_data` | `/data` | Temporary login-attempt counters, persisted with Redis AOF |
 
 The exact host mount point is managed by Docker. On Linux it can be inspected with:
@@ -62,6 +62,11 @@ Flyway creates the application schema from `backend/src/main/resources/db/migrat
 | `lessons` | Lesson metadata and complete activity content in PostgreSQL `JSONB` | Belongs to `course_modules`; module deletion cascades to lessons |
 | `lesson_progress` | Per-student completion, best score, earned XP, and timestamps | Unique per user and lesson; scores are constrained to 0–100 |
 | `saved_words` | Each student's vocabulary collection | Unique per user and normalized word |
+| `products` | Bilingual course/book catalog, toman price, preview, availability, entitlement target, and book resource | Product type and delivery target are constrained; slug is unique |
+| `purchase_orders` | Approved beta checkout header and immutable toman totals | Belongs to a user; currency is constrained to TOMAN |
+| `purchase_order_items` | Product title/type/price snapshots at purchase time | Belongs to an order and references the original product |
+| `invoices` | Stable invoice number and issue timestamp | Exactly one invoice per order; number is unique |
+| `product_entitlements` | Durable course access and book-download ownership | Unique per user/product and tied to the granting order |
 | `audit_events` | Registration, verification, login, approval, and completion activity | Actor points to `users`; deleting an actor keeps the audit event and clears the reference |
 
 The central relationships are:
@@ -71,6 +76,9 @@ users ─┬─< email_verification_tokens
        ├─< refresh_tokens
        ├─< lesson_progress >─ lessons >─ course_modules
        ├─< saved_words
+       ├─< purchase_orders ─┬─< purchase_order_items >─ products
+       │                    └── invoices
+       ├─< product_entitlements >─ products
        └─< audit_events
 ```
 
@@ -85,6 +93,23 @@ make curriculum
 ```
 
 At startup, `CurriculumSeeder` inserts missing modules and lessons into PostgreSQL. Existing curriculum rows are not overwritten. During development, changing an existing seeded lesson therefore requires a new Flyway migration or a deliberate local database reset. Production curriculum changes should always use an additive, reviewed migration.
+
+## Commerce and invoice data flow
+
+The beta checkout deliberately does not connect to a bank or payment gateway:
+
+1. An approved student chooses one or more active products.
+2. Spring validates product availability and confirms that the student does not already own them.
+3. One PostgreSQL transaction inserts the approved order, immutable item snapshots, invoice metadata, and product entitlements.
+4. A course entitlement matches the purchased A1 or A2 level and becomes part of the lesson unlock rule.
+5. A book entitlement authorizes the protected PDF download endpoint.
+6. Persian invoice PDF bytes are rendered on demand from durable order data.
+
+Money is stored as whole toman in `BIGINT` columns. No card number, bank token, gateway response, or other payment credential exists in the schema.
+
+Invoice PDFs are not stored in PostgreSQL. The database stores their immutable source data and the backend regenerates the Persian PDF on demand with embedded fonts, Persian digits, and a Jalali issue date. Demo book files live in `backend/src/main/resources/books` and are packaged inside the Spring application image; ownership remains in PostgreSQL.
+
+The `purchase_order_items` title and price snapshots preserve what the student bought even if an administrator later changes the catalog title, price, or active flag. Orders and invoices use restrictive foreign keys so accidental product or user deletion cannot destroy commercial history.
 
 ## Migrations
 
@@ -141,7 +166,8 @@ TTL login:<hash>
 ## Retention and production operations
 
 - Expired verification and refresh-token records remain inert but are not currently removed by a scheduled cleanup job.
-- Audit records are retained indefinitely unless an explicit retention migration or maintenance process is added.
+- Audit, order, invoice, and entitlement records are retained indefinitely unless an explicit retention policy is added.
+- Generated invoice bytes are ephemeral; the PDF is recreated from PostgreSQL data for each authorized download.
 - Local named volumes are not a production backup strategy.
 - Production should use managed PostgreSQL with encrypted storage, automated backups, point-in-time recovery, restricted network access, and monitored capacity.
 - Production Redis should require authentication and private networking; its data may be discarded because it is not the system of record.

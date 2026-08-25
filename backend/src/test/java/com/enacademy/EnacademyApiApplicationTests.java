@@ -3,6 +3,7 @@ package com.enacademy;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.enacademy.auth.UserRepository;
+import com.enacademy.commerce.CommerceRepository;
 import com.enacademy.learning.LearningRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -29,10 +30,12 @@ class EnacademyApiApplicationTests {
 
     @Autowired LearningRepository learning;
     @Autowired UserRepository users;
+    @Autowired CommerceRepository commerce;
 
     @Test
     void migrationsSeedTheFullCurriculumAndBootstrapTheAdmin() {
         assertThat(learning.modules()).hasSize(8);
+        assertThat(commerce.allProducts()).hasSize(4);
         assertThat(learning.modules().stream().flatMap(module -> learning.lessonsForModule(module.id()).stream())).hasSize(16);
         assertThat(users.findByEmail("admin@enacademy.local")).get().satisfies(admin -> {
             assertThat(admin.approved()).isTrue();
