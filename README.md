@@ -83,4 +83,4 @@ docker compose build
 
 GitHub Actions repeats the backend tests, frontend lint/type/build checks, Compose validation, and production image builds on every pull request.
 
-See [Architecture](docs/architecture.md), [Database guide](docs/database.md), [Security](docs/security.md), and [Contributing](CONTRIBUTING.md) before extending the platform.
+Start with the [Complete system guide](docs/system-guide.md) for product workflows, architecture diagrams, data design, security, technology decisions, operations, and the roadmap. See also [Architecture](docs/architecture.md), [Database guide](docs/database.md), [Security](docs/security.md), and [Contributing](CONTRIBUTING.md).
