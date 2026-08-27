@@ -2,6 +2,8 @@
 
 > This document describes ENAcademy as it is implemented in this repository. It explains the product, architecture, runtime, workflows, data model, security model, technology decisions, delivery process, operations, limitations, and recommended roadmap.
 
+Each of the 20 main parts ends with a **Teaching section**. The original reference and use-case material remains authoritative and unchanged in purpose; the teaching blocks add learning goals, a guided explanation, practical exercises, a success check, and review questions.
+
 ## Table of contents
 
 1. [Product overview](#1-product-overview)
@@ -56,6 +58,31 @@ The platform is more than a visual demonstration. Accounts, verification tokens,
 - It does not yet contain payments, certificates, instructor authoring, or live classes.
 - Speech recognition uses browser capabilities; it is not a phoneme-level pronunciation engine.
 - Persian localization translates the interface, not the English material being taught.
+
+### Teaching section — Product overview
+
+**Learning goals**
+
+- Explain the problem ENAcademy solves and identify its two human roles.
+- Separate product goals from current non-goals.
+- Recognize why the platform is a real stateful application rather than a visual demo.
+
+**Lesson.** Start from the learner outcome: use English in a realistic moment. The listening, words, grammar, check, and speaking steps are product choices that serve that outcome. Then trace the two roles. A student owns a learning journey; an administrator controls admission and governance. Notice that registration is deliberately open while learning access is deliberately controlled.
+
+**Guided practice**
+
+1. Write a one-sentence problem statement for ENAcademy.
+2. For each proposed feature, classify it as a current goal, current non-goal, or roadmap item.
+3. Explain why persistent progress changes the product from a landing page into a platform.
+4. Describe one student success metric and one administrator success metric.
+
+**Success check.** You can explain ENAcademy without naming its technologies, and you do not promise certificates, live classes, real payments, or multi-tenancy as existing capabilities.
+
+**Review questions**
+
+1. Why are email verification and administrator approval both part of the product?
+2. Which learning step turns passive understanding into active use?
+3. What would have to change before this became a multi-school LMS?
 
 ---
 
@@ -112,6 +139,31 @@ The platform is more than a visual demonstration. Accounts, verification tokens,
 - Health, readiness, liveness, and Prometheus endpoints.
 - GitHub Actions quality gates.
 - Safe start and stop scripts.
+
+### Teaching section — Implemented capabilities
+
+**Learning goals**
+
+- Group features by public, student, administrator, and engineering audiences.
+- Distinguish a user-visible capability from the infrastructure that supports it.
+- Verify claims against an observable screen, API, database record, or CI result.
+
+**Lesson.** A capability is complete only when its full path works. For example, email verification includes the registration form, token creation, message delivery, verification endpoint, database update, and user feedback. Likewise, purchasing includes preview, validation, order and invoice creation, entitlement delivery, history, and protected download.
+
+**Guided practice**
+
+1. Pick one capability from each audience group.
+2. Identify its entry screen, backend rule, stored data, and failure state.
+3. Mark which capabilities require authentication, approval, ownership, or ADMIN role.
+4. Compare the visible feature list with `/docs`, the database tables, and the relevant UI route.
+
+**Success check.** For any feature claim, you can point to both a user-facing result and an authoritative backend or operational result.
+
+**Review questions**
+
+1. Why is dark mode a frontend capability while lesson unlocking is a backend capability?
+2. Which capabilities depend on Mailpit, Redis, or PostgreSQL?
+3. What evidence proves that a purchased book is protected?
 
 ---
 
@@ -175,6 +227,31 @@ flowchart LR
 
 Controllers translate HTTP requests into validated service calls. Services own business rules and transactions. Repositories own SQL and row mapping. This separation prevents presentation choices from becoming security choices.
 
+### Teaching section — System architecture
+
+**Learning goals**
+
+- Read context, container, and backend-layer diagrams.
+- Trace one request from the browser to durable storage and back.
+- Explain why each boundary exists.
+
+**Lesson.** Read each diagram at a different zoom level. The context diagram shows people and systems. The container diagram shows deployable processes and networks. The backend-layer diagram shows code responsibilities. The same request appears differently at each level, but the trust direction remains browser → Next.js → Spring → repository → PostgreSQL.
+
+**Guided practice**
+
+1. Trace `GET /api/v1/learning/dashboard` through the same-origin rewrite, security filter, controller, service, repository, and database.
+2. Repeat the trace for email verification and identify where SMTP replaces a normal response path.
+3. Explain why PostgreSQL and Redis do not publish host ports.
+4. Name the layer where HTTP validation, business transactions, and SQL each belong.
+
+**Success check.** You can redraw the architecture from memory and place a new business rule in the service layer instead of the browser or repository.
+
+**Review questions**
+
+1. Why does Next.js proxy `/api` instead of exposing a Docker hostname?
+2. What breaks if a controller contains SQL?
+3. Which component remains authoritative when the browser state is stale?
+
 ---
 
 ## 4. Component responsibilities
@@ -194,6 +271,30 @@ Controllers translate HTTP requests into validated service calls. Services own b
 ### Source-of-truth rule
 
 PostgreSQL is authoritative. The browser must never decide whether somebody is an administrator, whether an account is approved, whether a lesson is unlocked, or how much XP is earned. Spring Boot enforces those rules.
+
+### Teaching section — Component responsibilities
+
+**Learning goals**
+
+- Assign each fact to one authoritative owner.
+- Distinguish durable, temporary, derived, and presentation state.
+- Prevent business rules from leaking across boundaries.
+
+**Lesson.** Use the source-of-truth rule whenever two components could disagree. PostgreSQL stores durable facts, Spring interprets and changes them, Next.js presents them, Redis holds disposable counters, and the browser keeps only short-lived session and display state. A component may cache or display a fact without becoming its owner.
+
+**Guided practice**
+
+1. Classify access JWT, theme preference, account status, login counter, invoice total, and lesson completion by owner and lifetime.
+2. Imagine the browser says a lesson is unlocked but PostgreSQL says it is locked; decide which result wins.
+3. Propose where a future certificate record should live and which service should issue it.
+
+**Success check.** You never rely on local storage, a hidden button, or a route redirect to enforce identity, role, ownership, price, or learning sequence.
+
+**Review questions**
+
+1. Why is Redis allowed to lose its data?
+2. Why does Next.js own no authoritative progress?
+3. What is the difference between owning data and rendering data?
 
 ---
 
@@ -382,6 +483,32 @@ Each checkout is one purchase and creates exactly one invoice in the same databa
 
 The item name and price are copied into immutable order-item snapshots at checkout. A later catalog edit therefore cannot rewrite an older invoice. PostgreSQL enforces `invoices.order_id` as unique, while the service creates the order, invoice, item snapshots, and entitlements atomically; a failure rolls back the complete purchase instead of leaving a partial invoice or partial access grant.
 
+### Teaching section — Application workflows
+
+**Learning goals**
+
+- Follow registration, account state, session refresh, administration, learning, and commerce workflows.
+- Identify validation, authorization, transaction, audit, and rollback points.
+- Predict safe outcomes when a step fails.
+
+**Lesson.** Workflows are state transitions, not just page sequences. Registration creates a pending student; verification proves mailbox control; approval grants platform admission. Login creates two kinds of session material. Lesson completion rechecks access before an idempotent upsert. Checkout creates the order, immutable item rows, invoice, and entitlements atomically.
+
+**Guided practice**
+
+1. Draw the state of the user before and after registration, verification, approval, suspension, and restoration.
+2. Trace an expired access JWT through refresh rotation and the single request retry.
+3. Explain the expected response when an unverified student is approved, a locked lesson is submitted, or an owned product is purchased again.
+4. For a two-product checkout, list every row created and show why one invoice contains two item lines.
+5. Identify the audit event produced by each sensitive successful workflow.
+
+**Success check.** You can state the preconditions, state changes, result, and rollback behavior for every workflow in section 5.
+
+**Review questions**
+
+1. Why must lesson access be checked again on completion?
+2. Why is the invoice created in the checkout transaction?
+3. What does refresh-token rotation prevent?
+
 ## 6. Authentication and authorization
 
 ### Passwords
@@ -484,6 +611,32 @@ Exact implementation links:
 
 Protected business operations reload the current account from PostgreSQL, so suspension takes effect without waiting for the access JWT to expire.
 
+### Teaching section — Authentication and authorization
+
+**Learning goals**
+
+- Distinguish authentication, authorization, approval, and ownership.
+- Explain passwords, access JWTs, refresh tokens, email tokens, signing secrets, and rate-limit keys.
+- Trace where every credential is stored and validated.
+
+**Lesson.** Authentication answers who the caller is; authorization answers what that identity may do. The short-lived JWT proves a signed identity and role, but database status and ownership checks still decide business access. Opaque refresh and verification tokens are useful only once and only their hashes are stored. The JWT signing secret is server configuration, not a user token.
+
+**Guided practice**
+
+1. Build a lifecycle table for access, refresh, and verification tokens: creation, transport, storage, expiry, consumption, and revocation.
+2. Read `AuthService`, `AuthController`, `SecurityConfig`, and `AuthProvider` in that order.
+3. Decode only a local development JWT payload and identify `iss`, `sub`, `role`, `iat`, and `exp`; never paste a real token into an external website.
+4. Verify that refresh uses an HttpOnly SameSite cookie and that protected JSON/download requests add the bearer header.
+5. Explain why an invoice UUID or lesson slug is not an authorization token.
+
+**Success check.** You can explain why stealing a database token hash is not the same as stealing the raw token, and why a valid JWT cannot override a suspended account or missing entitlement.
+
+**Review questions**
+
+1. Why is the access JWT kept out of local storage?
+2. What is rotated during refresh?
+3. Which change would require a new CSRF design review?
+
 ---
 
 ## 7. Learning system
@@ -534,6 +687,32 @@ Words are normalized to lowercase and unique per user. Re-saving is harmless, an
 ### Speaking practice
 
 The browser Web Speech API provides text-to-speech and, where available, recognition. A lightweight phrase-overlap score gives immediate feedback. This is motivational practice, not formal pronunciation grading. A future speech service would require explicit consent, privacy controls, retention rules, and cost management.
+
+### Teaching section — Learning system
+
+**Learning goals**
+
+- Understand curriculum authoring, publishing, ordering, progress, vocabulary, and speech practice.
+- Explain entitlement and sequence checks.
+- Recognize idempotent learning writes.
+
+**Lesson.** Curriculum content starts as typed authoring data, becomes deterministic JSON, and is inserted by the backend seeder. Course ownership selects which level is available; completion of earlier lessons controls sequence inside that level. Progress uses a unique user/lesson row and an upsert so retries improve or preserve results instead of duplicating them.
+
+**Guided practice**
+
+1. Follow one lesson from `frontend/lib/curriculum.ts` to exported JSON, seeding, API response, and `LessonPlayer`.
+2. Given incomplete A1 lesson 2 and a purchased A2 course, predict which first lesson in each owned level is accessible.
+3. Submit the same completion conceptually with scores 70, 60, and 90; calculate the retained best score and XP behavior.
+4. Save the same mixed-case word twice and explain the unique normalized result.
+5. Compare browser phrase overlap with a formal pronunciation assessment.
+
+**Success check.** You can modify curriculum safely without assuming the startup seeder overwrites existing production lessons.
+
+**Review questions**
+
+1. Why is the unlock query executed in PostgreSQL?
+2. What makes lesson completion idempotent?
+3. What privacy work is needed before adding cloud speech scoring?
 
 ---
 
@@ -647,6 +826,32 @@ Identity, ownership, uniqueness, ordering, and reporting use relational columns 
 
 PostgreSQL stores timezone-aware timestamps and the backend uses UTC. This avoids ambiguous server-local time after deployment.
 
+### Teaching section — Database design
+
+**Learning goals**
+
+- Read the entity-relationship diagram and table safeguards.
+- Choose relational columns or JSONB intentionally.
+- Reason about constraints, cascades, retention, transactions, and time.
+
+**Lesson.** The schema encodes invariants that must survive application bugs and concurrent requests. Foreign keys protect relationships, unique constraints prevent duplicates, checks limit valid values, and transactions keep multi-row workflows atomic. JSONB is reserved for flexible lesson activities; identity, ownership, money, ordering, and reporting remain relational.
+
+**Guided practice**
+
+1. Follow the foreign-key path from a user to an invoice and its purchased item snapshots.
+2. Find the unique constraints that prevent duplicate saved words, progress, entitlements, and invoices.
+3. Explain what survives if an audit actor is deleted and why user deletion is not currently exposed.
+4. Compare `lessons.content` JSONB with relational `lesson_progress`.
+5. Convert a stored UTC timestamp into a display timezone without changing the stored fact.
+
+**Success check.** You can review a proposed schema change for integrity, concurrency, deletion, retention, indexing, and migration impact.
+
+**Review questions**
+
+1. Why are purchased titles and prices copied into order-item rows?
+2. Why is money stored as whole toman?
+3. Which data belongs in JSONB and which does not?
+
 ---
 
 ## 9. API surface
@@ -751,6 +956,32 @@ The principal API link points are [next.config.ts](../frontend/next.config.ts) f
 
 The backend uses ProblemDetail responses with HTTP status, stable code, detail, and type. Validation failures also include a field-to-message map. Stable codes allow future frontend localization without parsing English text.
 
+### Teaching section — API surface
+
+**Learning goals**
+
+- Use HTTP methods, paths, status codes, auth requirements, and ProblemDetail correctly.
+- Trace API calls from frontend routes to Spring controllers.
+- Distinguish internal APIs, browser APIs, infrastructure protocols, and absent external services.
+
+**Lesson.** The public contract starts at `/api/v1`. GET reads, POST creates or performs a command, and PATCH changes part of a resource. Next.js rewrites same-origin `/api` requests to Spring. `apiFetch` handles JSON, `apiDownload` handles binary files, and Spring Security plus service checks decide access.
+
+**Guided practice**
+
+1. Open Swagger at `/docs` and group endpoints into public, authenticated student, owner-only, and ADMIN.
+2. Trace one registration, dashboard, purchase, and invoice request to its controller.
+3. For each request, identify request body/path values, response type, and expected failure codes.
+4. Trigger a harmless validation error in local development and inspect the ProblemDetail shape.
+5. Explain why Web Speech, SMTP, PostgreSQL, and Redis are integrations but the beta payment and invoice renderer are not external APIs.
+
+**Success check.** You can add an endpoint without bypassing the shared auth client, stable error contract, validation, or controller-service-repository boundary.
+
+**Review questions**
+
+1. Why does a book download use `apiDownload`?
+2. Where does `BACKEND_URL` take effect?
+3. What must be checked beyond possession of an invoice ID?
+
 ---
 
 ## 10. Frontend architecture
@@ -844,6 +1075,32 @@ CSS design tokens are not authentication tokens. Theme choices never enter the a
 - Speech fallback when browser recognition is absent.
 - Accessible labels and selection state on display controls.
 
+### Teaching section — Frontend architecture
+
+**Learning goals**
+
+- Understand routes, session state, localization, theme/design tokens, accessibility, and resilience.
+- Trace a theme or language change across providers and CSS.
+- Keep sensitive state separate from display preferences.
+
+**Lesson.** `app/layout.tsx` is the composition root: it loads styles/fonts and mounts preference and auth providers. `AuthProvider` manages volatile session behavior. `PreferencesProvider` validates non-sensitive local preferences, updates root attributes, and supplies translations. Semantic CSS tokens allow the same components to react to mode and accent without hard-coded per-page themes.
+
+**Guided practice**
+
+1. Change locale, mode, and accent locally and inspect `lang`, `dir`, `data-theme`, `data-accent`, and `enacademy.preferences`.
+2. Trace `--panel` from its light/dark definition to one store, lesson, and admin component.
+3. Reload and confirm the early script prevents an obvious theme flash.
+4. Navigate to a lesson and verify the preference dock uses its collision-safe lesson position.
+5. Disable speech recognition or reduced motion and observe the fallback behavior.
+
+**Success check.** You can add a component using semantic tokens and translated labels without storing credentials, duplicating theme colors, or breaking RTL.
+
+**Review questions**
+
+1. Why are design tokens unrelated to authentication tokens?
+2. Which file connects all routes to both providers?
+3. Why are client redirects not authorization?
+
 ---
 
 ## 11. Docker and runtime architecture
@@ -896,6 +1153,32 @@ Health dependencies prevent the API from racing its infrastructure and prevent t
 ### Stop behavior
 
 The stop script removes containers and the network but preserves named volumes. Normal stop/start cycles keep learner data.
+
+### Teaching section — Docker and runtime architecture
+
+**Learning goals**
+
+- Explain service startup order, networking, health, images, endpoints, and volumes.
+- Distinguish build-time and runtime dependencies.
+- Operate the stack without accidentally deleting data.
+
+**Lesson.** Compose starts infrastructure first, waits for health, then starts Spring, waits for readiness, and finally starts Next.js. Internal service names connect containers; only user/operator endpoints are published. Multi-stage builds discard compilers and caches from runtime images, while non-root users reduce container privilege.
+
+**Guided practice**
+
+1. Run `docker compose config --quiet` and then `./start-app.sh`.
+2. Use `docker compose ps` to compare health and published ports.
+3. Trace `frontend → backend → postgres/redis/mailpit` using Compose service names.
+4. Read both Dockerfiles and label each stage as dependency, build, or runtime.
+5. Run `./stop-app.sh`, restart, and confirm learner data remains because named volumes were preserved.
+
+**Success check.** You can diagnose whether a startup failure belongs to infrastructure health, backend readiness, frontend health, image build, network wiring, or configuration.
+
+**Review questions**
+
+1. Why does the frontend wait for backend readiness?
+2. Why are PostgreSQL and Redis not published?
+3. What is the difference between stopping containers and removing volumes?
 
 ---
 
@@ -959,6 +1242,32 @@ Automated checks run outside the developer machine. Backend and frontend jobs ru
 
 GitHub renders Mermaid directly. Diagrams remain searchable, reviewable text and can evolve with the code.
 
+### Teaching section — Technology decisions
+
+**Learning goals**
+
+- Explain why each major technology fits ENAcademy.
+- Discuss alternatives and tradeoffs instead of treating choices as universal.
+- Connect each technology to a concrete requirement.
+
+**Lesson.** Architecture choices are decisions under constraints. Next.js solves routing, metadata, UI, and same-origin proxying. React/TypeScript support interactive typed state. Spring/Java provide the server trust boundary, validation, security, and transactions. PostgreSQL protects relational facts; JSONB handles flexible lesson content. Redis owns disposable counters. Flyway owns schema history. Docker owns reproducibility. Mailpit makes email testable. JWT/cookies balance stateless access and revocable sessions. GitHub Actions supplies independent gates; Mermaid keeps diagrams reviewable.
+
+**Guided practice**
+
+1. Build a decision record with requirement, chosen technology, rejected alternatives, benefits, costs, and exit conditions.
+2. Compare PostgreSQL with MongoDB, SQLite, and MySQL for identity, ordered learning, invoices, and JSON lesson content.
+3. Compare explicit `JdbcClient` SQL with an ORM for the unlock query and reporting.
+4. Describe when Redis failure-open is acceptable and when a gateway should fail closed.
+5. Explain what complexity Docker and Spring add and what risks they remove.
+
+**Success check.** You can defend every choice while admitting its operational cost and naming a reasonable alternative.
+
+**Review questions**
+
+1. Why is PostgreSQL a stronger fit than a document-only store here?
+2. Why use both a short JWT and a rotating refresh token?
+3. Which decision would you revisit first at very large scale?
+
 ---
 
 ## 13. Security design
@@ -1020,6 +1329,32 @@ Client-side locks improve usability but never replace server enforcement.
 - No password reset, MFA, breached-password check, or admin session manager exists.
 - Audit data is append-only through current APIs, but database-level immutability permissions are not configured.
 
+### Teaching section — Security design
+
+**Learning goals**
+
+- Apply defense in depth across input, identity, authorization, rules, SQL, and constraints.
+- Identify trust boundaries and realistic threats.
+- Separate implemented controls from production requirements and known gaps.
+
+**Lesson.** Security is a chain. Validation rejects malformed input; authentication proves identity; authorization checks role, approval, and ownership; services enforce business rules; parameterized SQL avoids injection; constraints defend persisted invariants. If any earlier layer is bypassed, later layers still matter.
+
+**Guided practice**
+
+1. Threat-model registration role escalation, credential stuffing, stolen refresh tokens, ID guessing, locked-lesson submission, price tampering, and invoice access.
+2. For each threat, identify prevention, detection/audit, remaining risk, and a production improvement.
+3. Verify that ADMIN authorization exists in Spring Security rather than only the sidebar.
+4. Confirm secrets come from environment configuration and containers run non-root.
+5. Turn the production-requirements list into a pre-deployment checklist with owners.
+
+**Success check.** You can explain the impact of removing any one control and you never describe the current local defaults as production secure.
+
+**Review questions**
+
+1. Why are generic login errors useful?
+2. What can still happen before a 15-minute JWT expires?
+3. Which controls protect against a guessed invoice or product identifier?
+
 ---
 
 ## 14. Observability and errors
@@ -1042,6 +1377,32 @@ Expected business failures use ProblemDetail. Examples include:
 - VALIDATION_FAILED
 
 The frontend currently displays server detail. A future improvement should map stable codes to translated UI messages.
+
+### Teaching section — Observability and errors
+
+**Learning goals**
+
+- Distinguish health, readiness, liveness, metrics, logs, audits, and user-facing errors.
+- Use stable ProblemDetail codes.
+- Diagnose failures without leaking secrets or personal data.
+
+**Lesson.** Health answers whether the service can operate; readiness answers whether it should receive traffic; liveness answers whether it should be restarted; metrics describe trends. Business errors are expected domain outcomes and use stable codes. Unexpected exceptions are operational failures and need safe logs plus correlation, not raw details in the browser.
+
+**Guided practice**
+
+1. Inspect `/actuator/health`, readiness, liveness, `/actuator/prometheus`, `/v3/api-docs`, and `/docs` locally.
+2. Produce one validation failure, one unauthorized request, one forbidden workflow, and one conflict.
+3. Record status, stable code, detail, field errors, and expected frontend behavior.
+4. Design a correlation-ID path from reverse proxy to Spring logs without logging JWTs, passwords, cookies, or verification links.
+5. Choose alerts for API readiness, database failure, error rate, login throttling, and checkout failure.
+
+**Success check.** You can tell whether a failure is user-correctable, security-related, dependency-related, or a code defect and know which signal to inspect.
+
+**Review questions**
+
+1. Why should the frontend translate stable codes instead of parsing English detail?
+2. What is the difference between an audit event and an application log?
+3. Which actuator endpoints should be restricted in production?
 
 ---
 
@@ -1121,6 +1482,33 @@ This is a standard contribution flow, not an extra permanent branch layer.
 4. New IDs may be inserted by the startup seeder.
 5. Existing production lessons need a migration or future content versioning.
 
+### Teaching section — Development and delivery workflow
+
+**Learning goals**
+
+- Follow a safe local-to-GitHub delivery loop.
+- Match tests and documentation to the risk of a change.
+- Handle application, database, curriculum, and open-source changes differently.
+
+**Lesson.** A focused change moves through edit, fast checks, production builds, integrated runtime verification, reviewable commit, push, and CI. Schema history is forward-only. Curriculum has an authoring/export boundary. Pull requests add owner review and automated evidence without changing the application architecture.
+
+**Guided practice**
+
+1. Make a documentation-only practice edit on a branch and inspect the diff.
+2. For a frontend change, run tests, lint, type-check, and production build.
+3. For a backend change, run Maven verification and identify whether PostgreSQL/Testcontainers are required.
+4. For a schema change, draft a new migration and never edit an already-shared migration.
+5. Read `.github/workflows/ci.yml` and predict which job catches each failure type.
+6. Write a commit message containing the request, interpretation, changes, and verification.
+
+**Success check.** Another developer can reproduce your change, understand why it exists, review its risks, and see independent CI evidence.
+
+**Review questions**
+
+1. Why must generated curriculum JSON be reviewed?
+2. Why do container checks wait for frontend and backend jobs?
+3. When should an owner reject a passing pull request?
+
 ---
 
 ## 16. Operations and recovery
@@ -1174,6 +1562,32 @@ docker compose down --volumes --remove-orphans
 
 This permanently removes local application data unless a backup exists. It is not the normal stop operation.
 
+### Teaching section — Operations and recovery
+
+**Learning goals**
+
+- Start, stop, back up, restore, and inspect the platform safely.
+- Understand persistent-volume boundaries.
+- Treat recovery as a tested procedure rather than a command copied during an incident.
+
+**Lesson.** Normal stop removes replaceable containers and preserves durable volumes. A backup is useful only if it is recent, protected, restorable, and tested. Restore should isolate writers, load the dump, restart dependencies in order, and verify data and application health. Destructive reset is a development recovery tool, not routine maintenance.
+
+**Guided practice**
+
+1. Identify the exact PostgreSQL and Redis volume names and container paths.
+2. Create a local PostgreSQL custom-format backup without printing credentials.
+3. Record backup time, source version, checksum, encryption/storage location, and retention.
+4. Restore into a disposable environment first and verify users, progress, products, orders, and invoices.
+5. Write a recovery checklist for database loss, Redis loss, failed migration, and unhealthy frontend.
+
+**Success check.** You can prove a backup restores successfully without risking the only copy of current data.
+
+**Review questions**
+
+1. Why is Redis recovery different from PostgreSQL recovery?
+2. Why stop application writers before restore?
+3. Which command permanently removes local data?
+
 ---
 
 ## 17. Configuration reference
@@ -1201,6 +1615,32 @@ This permanently removes local application data unless a backup exists. It is no
 | ENACADEMY_START_TIMEOUT | Health wait seconds | Default 240 |
 
 Never commit real environment files, secrets, backups, or database exports.
+
+### Teaching section — Configuration reference
+
+**Learning goals**
+
+- Classify configuration as connectivity, identity bootstrap, token/security, public URL, or operation.
+- Understand where Compose, Spring, and Next.js consume each value.
+- Manage secrets without committing or displaying them.
+
+**Lesson.** Configuration separates environment facts from code. Compose wires service defaults and internal names. Spring reads database, Redis, SMTP, public URL, admin, JWT, cookie, and CORS settings. Next.js reads backend and site URLs during build/runtime as appropriate. Secrets need a secret manager or protected environment; example files contain placeholders only.
+
+**Guided practice**
+
+1. Copy `.env.example` to a local ignored `.env` and replace placeholders with development-only values.
+2. Trace `DATABASE_URL`, `JWT_SECRET`, `ALLOWED_ORIGINS`, `BACKEND_URL`, and `SITE_URL` from environment to consumer.
+3. Use `docker compose config --quiet` to validate structure; do not paste expanded secret-bearing output into chat or logs.
+4. Compare local HTTP cookie settings with required production HTTPS settings.
+5. Build an environment matrix for local, CI, staging, and production without recording real secret values.
+
+**Success check.** You know which values may be public, which are sensitive, which require restart/rebuild, and which component reads them.
+
+**Review questions**
+
+1. Why are `APP_PUBLIC_URL` and `SITE_URL` different concepts?
+2. Which variables connect Next.js to Spring?
+3. What fails if `JWT_ISSUER` changes while old tokens are active?
 
 ---
 
@@ -1235,6 +1675,32 @@ Never commit real environment files, secrets, backups, or database exports.
 - No end-to-end browser suite in CI.
 - Local volumes are not production disaster recovery.
 - One HS256 secret signs tokens per environment.
+
+### Teaching section — Known limitations
+
+**Learning goals**
+
+- Treat limitations as explicit engineering information, not embarrassment.
+- Separate product, learning, and technical gaps.
+- Prioritize by risk, user value, effort, and dependency.
+
+**Lesson.** A limitation describes a missing capability or accepted risk in the current scope. It must not be silently advertised as implemented. Security and recovery gaps usually outrank convenience. Some features, such as real payment or formal speech scoring, create legal, privacy, operational, and support obligations beyond writing code.
+
+**Guided practice**
+
+1. Put every limitation into a matrix: severity, probability, affected users, effort, prerequisite, and owner.
+2. Mark which limitations block public production, which block scale, and which are optional enhancements.
+3. Choose the first five hardening tasks and justify their order.
+4. Write acceptance criteria for password reset, token cleanup, end-to-end tests, and audit retention.
+5. Explain why browser speech overlap must not be marketed as pronunciation certification.
+
+**Success check.** Roadmap decisions are tied to explicit risks and outcomes rather than feature excitement alone.
+
+**Review questions**
+
+1. Which current limitation is most dangerous for a public deployment?
+2. Which limitations require policy or legal decisions?
+3. When should a limitation become a documented non-goal instead?
 
 ---
 
@@ -1275,6 +1741,32 @@ Never commit real environment files, secrets, backups, or database exports.
 - Add issue and pull-request templates.
 - Publish non-personal development fixtures.
 - Document versioning and releases.
+
+### Teaching section — Recommended roadmap
+
+**Learning goals**
+
+- Convert roadmap themes into ordered, testable delivery increments.
+- Recognize dependencies between hardening, infrastructure, learning depth, and open-source work.
+- Define completion with evidence.
+
+**Lesson.** The phases are intentionally ordered. Hardening reduces immediate risk. Managed infrastructure makes operations dependable. Learning depth adds educational value after the foundation is trustworthy. Open-source readiness makes outside contribution safe and understandable. Some work can overlap, but production exposure should not outrun security and recovery.
+
+**Guided practice**
+
+1. Turn each Phase 1 bullet into a small issue with motivation, scope, acceptance criteria, tests, documentation, and rollback.
+2. Draw dependencies such as HTTPS → secure cookies, managed database → backup/PITR drills, or public contributions → branch protection and templates.
+3. Assign outcome metrics: recovery time, error rate, token cleanup age, accessibility results, or curriculum mastery.
+4. Create a milestone that fits one release instead of implementing an entire phase at once.
+5. Revisit known limitations after each milestone and update both lists.
+
+**Success check.** Every roadmap item has a reason, owner, dependency, measurable definition of done, and evidence plan.
+
+**Review questions**
+
+1. Why does hardening precede learning expansion for public production?
+2. Which roadmap items reduce operational risk most?
+3. What minimum files and policies are needed before opening contributions?
 
 ---
 
@@ -1323,6 +1815,32 @@ ENAcademy/
 ├── CONTRIBUTING.md
 └── README.md
 ~~~
+
+### Teaching section — Repository map
+
+**Learning goals**
+
+- Navigate from a user behavior to frontend, backend, database, test, configuration, and documentation files.
+- Know where new code belongs.
+- Avoid creating duplicate sources of truth.
+
+**Lesson.** Navigate by responsibility, not file-name guessing. Routes live in `frontend/app`; reusable browser behavior lives in `frontend/components`; curriculum and translations live in `frontend/lib`. Spring packages follow domains such as auth, learning, commerce, admin, config, and shared behavior. Resources hold migrations, curriculum JSON, protected books, fonts, and configuration. Root files define delivery and operation.
+
+**Guided practice**
+
+1. Locate the full path for login, lesson completion, purchase checkout, invoice rendering, theme switching, and student approval.
+2. For each behavior, identify its page/component, controller, service, repository, migration/table, and test.
+3. Find where the API proxy, Docker topology, CI workflow, start script, and environment examples live.
+4. Decide where you would add password reset, a new product type, an additional lesson activity, and an operations runbook.
+5. Update this map whenever a new top-level responsibility appears.
+
+**Success check.** Starting from any screen or API endpoint, you can find the authoritative implementation and its supporting tests/configuration without searching the entire repository.
+
+**Review questions**
+
+1. Where should a new business rule live?
+2. Which files are generated and which are authored?
+3. When does a new folder deserve an entry in the repository map?
 
 ## Related documents
 
