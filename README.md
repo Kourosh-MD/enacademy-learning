@@ -140,7 +140,7 @@ start-app.sh / stop-app.sh Friendly lifecycle commands
 
 ## Documentation
 
-- [Complete system guide](docs/system-guide.md) — all product workflows, system diagrams, APIs, data relationships, trust boundaries, technical decisions, and operations
+- [Complete system guide](docs/system-guide.md) — all product workflows, system diagrams, API linkages, authentication-token lifecycle, theme design tokens, data relationships, trust boundaries, technical decisions, and operations
 - [Database guide](docs/database.md) — what is stored, where it lives, how tables relate, and how to inspect or back it up
 - [Architecture](docs/architecture.md) — concise component and deployment view
 - [Security](docs/security.md) — authentication, authorization, secrets, headers, and deployment checklist

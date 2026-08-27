@@ -420,6 +420,58 @@ The 72-character maximum matches BCrypt's practical input boundary.
 - Default expiration is 24 hours.
 - A used timestamp prevents reuse.
 
+### Token, secret, and credential linkage
+
+The word *token* is used in two different ways in this project: authentication tokens prove identity, while CSS design tokens define visual values. They are unrelated. Authentication tokens and secrets must never be placed in CSS, local storage, source control, logs, invoice files, or URLs except for the single-use email-verification value.
+
+~~~mermaid
+flowchart LR
+    Login[Login or refresh] --> Auth[AuthService]
+    Secret[JWT_SECRET environment secret] --> Sign[HS256 signer]
+    Auth --> Sign
+    Sign --> JWT[15-minute access JWT]
+    Auth --> Refresh[14-day random refresh token]
+    JWT --> Memory[AuthProvider module memory]
+    Refresh --> Cookie[HttpOnly SameSite Strict cookie]
+    Refresh --> Hash[SHA-256 hash in PostgreSQL]
+    Memory --> Header[Authorization: Bearer JWT]
+    Header --> Rewrite[Next.js /api rewrite]
+    Rewrite --> Security[Spring Security resource server]
+    Security --> Claims[Validate signature issuer and expiry]
+    Claims --> Role[Map role claim to ROLE_*]
+    Role --> Controller[Protected controller]
+    Controller --> UserCheck[Reload current user or ownership from PostgreSQL]
+    Cookie --> Rotate[POST /auth/refresh]
+    Hash --> Rotate
+    Rotate --> Auth
+~~~
+
+| Material | Created or configured by | Browser location | Server-side location | Lifetime and use | Linked code |
+| --- | --- | --- | --- | --- | --- |
+| Access JWT | `AuthService.createSession` signs it with HS256 | Module memory only; never local storage | Not persisted | 15 minutes by default; sent as `Authorization: Bearer ...` | `frontend/components/AuthProvider.tsx`, `backend/.../config/SecurityConfig.java` |
+| Refresh token | `SecureRandom` creates 32 bytes and URL-safe Base64 encodes them | Raw value in the `enacademy_refresh` HttpOnly cookie | SHA-256 hash in `refresh_tokens` | 14 days by default; consumed and replaced on every refresh | `AuthService`, `AuthController`, `TokenRepository`, `AuthProvider` |
+| Email-verification token | Registration creates the same 32-byte random form | Raw value appears once in the emailed `/verify?token=...` link | SHA-256 hash in `email_verification_tokens` | 24 hours, single use, then `used_at` prevents reuse | `AuthService`, `VerificationMailer`, `frontend/app/verify/page.tsx` |
+| JWT signing secret | Operator supplies `JWT_SECRET` | Never sent to the browser | Environment/configuration only | Long-lived per environment; minimum 32 bytes; signs and verifies access JWTs | `.env`, `docker-compose.yml`, `application.yml`, `SecurityConfig` |
+| Password hash | BCrypt cost 12 after registration/admin bootstrap | No password or hash is returned | `users.password_hash` | Credential verifier, not an API token | `AuthService`, `PasswordEncoder`, user repository |
+| Login rate-limit key | `RateLimitService` derives a non-reversible key from email/IP context | None | Expiring Redis key such as `login:<hash>` | 15-minute protection window; not an authentication credential | `RateLimitService`, Redis |
+
+Access JWT claims are `iss` (configured issuer), `iat`, `exp`, `sub` (user UUID), `role`, `email`, and `name`. `SecurityConfig` validates the HS256 signature, configured issuer, and expiration. It maps the `role` claim to a Spring authority such as `ROLE_ADMIN`; `/api/v1/admin/**` requires that role. Business services still reload the user or entitlement from PostgreSQL, so a valid JWT alone cannot bypass suspension, approval, invoice ownership, course ownership, or book ownership.
+
+Refresh linkage is deliberately split: JavaScript can request `/api/v1/auth/refresh` with `credentials: 'include'`, but it cannot read the HttpOnly cookie. The browser attaches the cookie only to its `/api/v1/auth` path. The API consumes the stored hash, creates a new access JWT and refresh token, stores the new hash, and replaces the cookie. Logout revokes the hash and expires the cookie.
+
+There is no CSRF token in the current design. Protected business requests require a bearer JWT, while the only cookie-authenticated operations are refresh/logout and the refresh cookie is SameSite Strict. Any future cross-site cookie configuration must add a fresh CSRF review. Invoice IDs, order IDs, product IDs, and lesson slugs are identifiers—not authorization tokens—and every protected lookup performs a server-side user/role/ownership check.
+
+The application uses no payment-gateway API key, bank token, Google API key, speech API key, external invoice token, OpenAI API key, or social-login token. PostgreSQL passwords, SMTP credentials, and `JWT_SECRET` are deployment secrets rather than user session tokens; they belong in environment/secret management and never in Git.
+
+Exact implementation links:
+
+- [AuthService](../backend/src/main/java/com/enacademy/auth/AuthService.java) creates access, refresh, and verification tokens and hashes opaque tokens.
+- [AuthController](../backend/src/main/java/com/enacademy/auth/AuthController.java) sets, rotates, and expires the refresh cookie.
+- [TokenRepository](../backend/src/main/java/com/enacademy/auth/TokenRepository.java) persists and consumes verification/refresh hashes.
+- [SecurityConfig](../backend/src/main/java/com/enacademy/config/SecurityConfig.java) validates JWTs, maps roles, and protects routes.
+- [AuthProvider](../frontend/components/AuthProvider.tsx) holds the access JWT, adds bearer headers, refreshes once after 401, and handles protected downloads.
+- [application.yml](../backend/src/main/resources/application.yml), [docker-compose.yml](../docker-compose.yml), and [.env.example](../.env.example) link token lifetimes, issuer, secret, and cookie settings into the runtime.
+
 ### Access rules
 
 | Resource | Rule |
@@ -644,6 +696,57 @@ Base path: /api/v1
 | GET | /store/invoices/{id}/pdf | Download owned Persian invoice |
 | GET | /store/books/{productId}/download | Download an owned book |
 
+### API integration and linkage map
+
+~~~mermaid
+flowchart LR
+    Page[Next.js page or component] -->|fetch same-origin /api/v1/...| Helper{Request type}
+    Helper -- JSON --> ApiFetch[AuthProvider.apiFetch]
+    Helper -- PDF/book --> ApiDownload[AuthProvider.apiDownload]
+    Helper -- Public auth --> PublicFetch[Direct fetch]
+    ApiFetch --> Bearer[Attach access JWT]
+    ApiDownload --> Bearer
+    Bearer --> Rewrite[Next.js rewrite /api/:path*]
+    PublicFetch --> Rewrite
+    Rewrite -->|BACKEND_URL/api/:path*| Spring[Spring Boot controllers]
+    Spring --> Security[Spring Security and validation]
+    Security --> Services[Domain services]
+    Services --> Postgres[(PostgreSQL)]
+    Services --> Redis[(Redis rate limits)]
+    Services --> SMTP[SMTP or Mailpit]
+    Services --> Assets[Invoice renderer and protected books]
+~~~
+
+The browser always uses relative `/api/v1/...` URLs. `frontend/next.config.ts` rewrites `/api/:path*` to `${BACKEND_URL}/api/:path*`; Docker sets `BACKEND_URL` to the internal backend service, while direct local frontend development falls back to `http://localhost:8080`. This keeps the browser on the frontend origin, allows the refresh cookie to work consistently, and avoids exposing an internal Docker hostname.
+
+| API or integration | What it is used for | Frontend/backend linkage | Credential or token |
+| --- | --- | --- | --- |
+| ENAcademy REST API | Authentication, learning, administration, store, purchases, invoices, and downloads | Relative calls from pages and `AuthProvider` → Next.js rewrite → Spring controllers under `/api/v1` | Bearer access JWT on protected calls; refresh cookie only on auth refresh/logout |
+| OpenAPI/Swagger UI | Interactive backend contract documentation | Springdoc exposes `/docs` and `/v3/api-docs` directly from the backend | Public in the current local configuration; no API key |
+| Spring Actuator | Container and operator health checks | Docker health check and startup scripts call `/actuator/health` | Public health endpoint; no user token |
+| SMTP / Mailpit | Deliver or locally capture email-verification links | `VerificationMailer` → Spring Mail configuration → `MAIL_HOST`/`MAIL_PORT` | Optional SMTP credentials in deployment secrets; verification token is message content, not an SMTP credential |
+| Web Speech APIs | Lesson pronunciation playback and optional recognition | `frontend/components/LessonPlayer.tsx` calls browser `speechSynthesis` and `SpeechRecognition`/`webkitSpeechRecognition` | No ENAcademy API key; availability and remote processing depend on the user's browser |
+| Google font source through `next/font` | Obtain Manrope and Vazirmatn during the frontend build | `frontend/app/layout.tsx` → Next.js font build pipeline → bundled optimized font assets | No Google API key and no runtime browser call to Google Fonts |
+| PostgreSQL JDBC | Durable application data and transactions | Repository classes → Spring datasource → `DATABASE_URL` | Database username/password deployment credentials, never browser tokens |
+| Redis protocol | Expiring login-rate counters | `RateLimitService` → `REDIS_HOST`/`REDIS_PORT` | Internal infrastructure connection; no user session token |
+| GitHub Actions | CI for tests, type checks, builds, Compose, and containers | `.github/workflows/ci.yml` runs on push and pull request | GitHub-managed runner authorization; no application API key in source |
+| Payment or banking API | Not used in the beta workflow | Checkout is approved inside `CommerceService`; no redirect or gateway client exists | No merchant key, bank token, card data, or gateway callback |
+| Invoice API | Not external | `InvoicePdfService` renders the Persian PDF inside Spring from PostgreSQL snapshots | Access JWT plus ownership/ADMIN check; no invoice-service token |
+
+#### Frontend route to backend controller
+
+| User-facing area | Request origin | Shared client | Spring entry point |
+| --- | --- | --- | --- |
+| Registration and login | `/login`, `/verify` | Direct public fetch plus `AuthProvider` session methods | `AuthController` |
+| Dashboard, lessons, saved words | `/dashboard`, `/learn/[lessonId]` | `apiFetch` | `LearningController` |
+| Student store and purchase history | `/store`, `/purchases` | `apiFetch` and `apiDownload` | `CommerceController` |
+| Student approval and audits | `/admin` | `apiFetch` | `AdminController` |
+| Product/order/invoice administration | `/admin/commerce` | `apiFetch` and `apiDownload` | `CommerceAdminController` |
+
+`apiFetch` and `apiDownload` add the in-memory bearer token, include cookies when appropriate, and perform one refresh-and-retry after a 401. `apiDownload` returns a `Blob` for invoices and books instead of attempting JSON parsing. Spring Security remains the real boundary: a frontend link or route redirect never grants authorization.
+
+The principal API link points are [next.config.ts](../frontend/next.config.ts) for the same-origin rewrite, [AuthProvider](../frontend/components/AuthProvider.tsx) for shared authenticated requests, [AuthController](../backend/src/main/java/com/enacademy/auth/AuthController.java), [LearningController](../backend/src/main/java/com/enacademy/learning/LearningController.java), [AdminController](../backend/src/main/java/com/enacademy/admin/AdminController.java), [CommerceController](../backend/src/main/java/com/enacademy/commerce/CommerceController.java), and [CommerceAdminController](../backend/src/main/java/com/enacademy/commerce/CommerceAdminController.java) for Spring entry points.
+
 ### Error contract
 
 The backend uses ProblemDetail responses with HTTP status, stable code, detail, and type. Validation failures also include a field-to-message map. Stable codes allow future frontend localization without parsing English text.
@@ -698,6 +801,39 @@ Client redirects are only user experience. Spring Security is the authorization 
 - A small early script reduces theme flashing.
 
 Only non-sensitive display preferences use local storage. Credentials never do.
+
+#### Theme and CSS design-token linkage
+
+~~~mermaid
+flowchart LR
+    Layout[app/layout.tsx defaults] --> Early[Early head script reads preferences]
+    Layout --> Provider[PreferencesProvider]
+    Provider --> Controls[Global language, mode, and palette controls]
+    Controls --> State[locale, mode, accent state]
+    State --> Storage[localStorage enacademy.preferences]
+    State --> Root[html lang, dir, data-theme, data-accent]
+    Root --> Globals[globals.css semantic design tokens]
+    Globals --> Product[product.css component and dark-mode rules]
+    Product --> Pages[Public, auth, learning, store, invoice, and admin UI]
+    Fonts[next/font variables] --> Root
+~~~
+
+| Design-token group | Tokens or attributes | Defined/assigned in | Used by |
+| --- | --- | --- | --- |
+| Text | `--ink`, `--muted` | `frontend/app/globals.css` | Body copy, headings, labels, secondary text |
+| Surfaces and borders | `--paper`, `--panel`, `--panel-soft`, `--line` | `globals.css` light/dark definitions | Page backgrounds, cards, forms, tables, dialogs, lesson and commerce panels |
+| Brand/accent | `--mint`, `--mint-dark`, `--lime`, `--violet`, `--amber`, `--deep` | Base emerald palette plus `html[data-accent=...]` overrides in `globals.css` | Buttons, progress, decorative gradients, badges, focus and active states |
+| Contrast-safe controls | `--solid-bg`, `--solid-fg`, `--accent-solid`, `--on-accent`, `--on-highlight` | Light/dark semantic definitions in `globals.css` | Filled buttons, active navigation, highlighted controls, and readable foreground colors |
+| Typography | `--font-latin`, `--font-persian` | Created by `next/font` in `app/layout.tsx` and attached to the root class | English body uses Manrope; `html[dir=rtl]` switches to Vazirmatn |
+| Mode selector | `data-theme=light|dark` | `PreferencesProvider` on `<html>` | Dark-mode overrides in `globals.css` and `product.css` |
+| Palette selector | `data-accent=emerald|ocean|violet|sunset|rose` | `PreferencesProvider` on `<html>` | Palette-specific semantic color overrides |
+| Language direction | `lang=en|fa`, `dir=ltr|rtl` | `PreferencesProvider` on `<html>` | Translation lookup, RTL layout, Persian font, and direction-sensitive spacing |
+
+[app/layout.tsx](../frontend/app/layout.tsx) is the global link point: it imports [globals.css](../frontend/app/globals.css) and [product.css](../frontend/app/product.css), attaches both font variables, wraps every route in [PreferencesProvider](../frontend/components/PreferencesProvider.tsx), and mounts `PreferenceControls`. The controls update provider state; the provider writes root attributes; CSS consumes those attributes and semantic variables. Components reference semantic variables instead of owning separate theme colors, so one palette change propagates through public pages, authentication, lessons, dashboards, store, purchases, invoices, and administration.
+
+The early inline script in `layout.tsx` reads only the non-sensitive `enacademy.preferences` JSON before React hydration and applies `lang`, `dir`, `data-theme`, and `data-accent`. This reduces a flash of the default theme. The provider validates the saved values again and ignores malformed data. On lesson routes, `PreferenceControls` adds `preference-dock-lesson`, which links to collision-safe positioning rules so the dock does not cover lesson navigation.
+
+CSS design tokens are not authentication tokens. Theme choices never enter the access JWT, refresh cookie, PostgreSQL, Redis, or API headers, and changing theme cannot affect authorization. Conversely, authentication secrets never enter CSS or `enacademy.preferences`.
 
 ### Accessibility and resilience
 
