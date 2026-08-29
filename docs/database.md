@@ -8,8 +8,8 @@ Docker Compose stores PostgreSQL and Redis data in named Docker volumes:
 
 | Service | Compose volume | Path inside the container | Purpose |
 | --- | --- | --- | --- |
-| PostgreSQL | `enacademy-platform_postgres_data` | `/var/lib/postgresql/data` | Accounts, tokens, curriculum, progress, products, approved beta orders, entitlements, invoices, saved words, and audit history |
-| Redis | `enacademy-platform_redis_data` | `/data` | Temporary login-attempt counters, persisted with Redis AOF |
+| PostgreSQL | `enacademy-platform_postgres_data` | `/var/lib/postgresql/data` | Accounts, tokens, curriculum, progress, online exams/attempts/answers, products, approved beta orders, entitlements, invoices, saved words, and audit history |
+| Redis | `enacademy-platform_redis_data` | `/data` | Temporary login, verification-resend, and password-reset counters, persisted with Redis AOF |
 
 The exact host mount point is managed by Docker. On Linux it can be inspected with:
 
@@ -58,6 +58,7 @@ Flyway creates the application schema from `backend/src/main/resources/db/migrat
 | `users` | Student and administrator identity, BCrypt password hash, role, approval status, and verification timestamp | Email is unique; role and status values are constrained |
 | `email_verification_tokens` | One-time email-verification token hashes and expiration | Belongs to `users`; raw tokens are never stored; deleted with the user |
 | `refresh_tokens` | Rotating session-token hashes, expiration, and revocation | Belongs to `users`; consumed tokens are revoked; deleted with the user |
+| `password_reset_tokens` | One-time password-reset hashes, expiration, use time, and creation time | Belongs to `users`; raw tokens are email-only; successful reset revokes all refresh sessions |
 | `course_modules` | A1–A2 unit metadata, outcomes, and ordering | Unit number is unique |
 | `lessons` | Lesson metadata and complete activity content in PostgreSQL `JSONB` | Belongs to `course_modules`; module deletion cascades to lessons |
 | `lesson_progress` | Per-student completion, best score, earned XP, and timestamps | Unique per user and lesson; scores are constrained to 0–100 |
@@ -67,6 +68,10 @@ Flyway creates the application schema from `backend/src/main/resources/db/migrat
 | `purchase_order_items` | Product title/type/price snapshots at purchase time | Belongs to an order and references the original product |
 | `invoices` | Stable invoice number and issue timestamp | Exactly one invoice per order; number is unique |
 | `product_entitlements` | Durable course access and book-download ownership | Unique per user/product and tied to the granting order |
+| `exams` | Bilingual exam identity, course level, duration, pass threshold, publication, and availability window | Slug is unique; dates and scoring ranges are constrained |
+| `exam_questions` | Ordered bilingual multiple-choice prompts/options, correct answer, explanation, and points | Unique position per exam; options use validated JSONB |
+| `exam_attempts` | One student's durable timer, lifecycle, score, result, save time, and version | Unique per exam/user; active and finalized fields are consistency-checked |
+| `exam_answers` | Latest selected option for one attempt/question | Composite primary key prevents duplicate answers |
 | `audit_events` | Registration, verification, login, approval, and completion activity | Actor points to `users`; deleting an actor keeps the audit event and clears the reference |
 
 The central relationships are:
@@ -74,13 +79,27 @@ The central relationships are:
 ```text
 users ─┬─< email_verification_tokens
        ├─< refresh_tokens
+       ├─< password_reset_tokens
        ├─< lesson_progress >─ lessons >─ course_modules
        ├─< saved_words
        ├─< purchase_orders ─┬─< purchase_order_items >─ products
        │                    └── invoices
        ├─< product_entitlements >─ products
+       ├─< exam_attempts ─< exam_answers >─ exam_questions >─ exams
        └─< audit_events
 ```
+
+## Online exam data flow
+
+The V3 migration creates the four exam tables, performance indexes, and complete seeded A1/A2 exams. Starting an exam uses the unique `(exam_id,user_id)` constraint and `ON CONFLICT` to create exactly one attempt. Saves validate answers, lock the attempt, transform one JSONB batch into one PostgreSQL upsert, and increment the attempt version. Submission locks the same row, calculates the score with one aggregate query, and finalizes the attempt once. Correct answers are returned only after finalization.
+
+The durable `deadline_at` makes PostgreSQL/Spring authoritative for timing. Browser timers are a display convenience and cannot extend an attempt. See [Online exams and 100-user capacity](exam-capacity.md) for query/index details and the reproducible concurrency test.
+
+## Account recovery and token maintenance
+
+The V4 migration, `V4__account_recovery_and_token_maintenance.sql`, adds `password_reset_tokens` and cleanup indexes for all three token tables. Verification resends invalidate the prior unused verification row before inserting a fresh hash. Password-reset requests similarly invalidate the prior unused reset row. A successful reset locks and consumes that row, stores a new BCrypt password hash, and revokes every active refresh token for the account in one transaction.
+
+`TokenCleanupService` runs daily at the configurable UTC cron. It deletes expired rows immediately and deletes used/revoked rows after the configured retention window. This prevents inert authentication data from growing without touching durable user, learning, commerce, invoice, exam, or audit records.
 
 ## Curriculum data flow
 
@@ -117,7 +136,7 @@ One checkout is one purchase order and one invoice. A checkout containing multip
 
 Flyway is the only schema-change mechanism. Hibernate automatic DDL is disabled.
 
-1. Add a new versioned SQL file such as `V2__add_learning_streaks.sql` under `backend/src/main/resources/db/migration`.
+1. Add a new versioned SQL file such as `V4__add_learning_streaks.sql` under `backend/src/main/resources/db/migration`.
 2. Make the migration forward-only and safe for existing data.
 3. Run `cd backend && ./mvnw test`; Testcontainers applies every migration to a clean PostgreSQL instance.
 4. Start the stack and inspect `flyway_schema_history` before committing.
@@ -161,13 +180,15 @@ Inspect Redis without publishing it to the host:
 
 ```bash
 docker compose exec redis redis-cli
-SCAN 0 MATCH login:* COUNT 100
-TTL login:<hash>
+SCAN 0 MATCH * COUNT 100
+TTL login:<sha256>
+TTL password-reset:<sha256>
+TTL verification-resend:<sha256>
 ```
 
 ## Retention and production operations
 
-- Expired verification and refresh-token records remain inert but are not currently removed by a scheduled cleanup job.
+- Expired verification, refresh, and password-reset tokens are removed by a scheduled cleanup job. Used/revoked rows are retained for `TOKEN_RETENTION_DAYS` before deletion.
 - Audit, order, invoice, and entitlement records are retained indefinitely unless an explicit retention policy is added.
 - Generated invoice bytes are ephemeral; the PDF is recreated from PostgreSQL data for each authorized download.
 - Local named volumes are not a production backup strategy.

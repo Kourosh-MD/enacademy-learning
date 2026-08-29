@@ -4,7 +4,7 @@
 
 ### A bilingual, production-shaped English learning platform
 
-Learn, manage, purchase, and track progress through one complete Spring and Next.js application.
+Learn, take timed exams, manage, purchase, and track progress through one complete Spring and Next.js application.
 
 [![CI](https://github.com/Kourosh-MD/enacademy-learning/actions/workflows/ci.yml/badge.svg)](https://github.com/Kourosh-MD/enacademy-learning/actions/workflows/ci.yml)
 ![Java](https://img.shields.io/badge/Java-21-ED8B00?logo=openjdk&logoColor=white)
@@ -26,12 +26,13 @@ The project currently delivers a complete A1–A2 English path. It is designed a
 | Area | What ENAcademy provides |
 |---|---|
 | Learning | Structured A1–A2 curriculum, interactive activities, sequential lessons, scoring, XP, saved vocabulary, and durable progress |
-| Accounts | Student registration, email verification, secure login, refresh tokens, rate limiting, and administrator approval |
+| Online exams | Bilingual timed A1/A2 exams, server-enforced deadlines, automatic batch saving, resume support, immediate grading/review, and administrator scheduling/monitoring |
+| Accounts | Student registration, verification resend, one-time password reset, secure login, rotating refresh tokens, rate limiting, and administrator approval |
 | Commerce | Course and book previews, toman pricing, instant beta checkout, automatic course unlocking, and protected book downloads |
 | Invoices | One uniquely numbered invoice per purchase with item names, quantities, prices, totals, customer details, Persian digits, and a Jalali date |
 | Administration | Student approval and suspension, platform metrics, audit visibility, product availability, prices, orders, and invoice access |
 | Experience | Responsive English/Persian UI, RTL support, professional local fonts, light/dark themes, selectable accent colors, and 3D landing-page motion |
-| Operations | Docker Compose, health checks, Flyway migrations, Mailpit email testing, start/stop scripts, and GitHub Actions quality gates |
+| Operations | Docker Compose, health checks, bounded pools, Flyway, scheduled token cleanup, structured request-correlated logs, Mailpit, start/stop scripts, a reproducible 100-user exam load test, and browser-tested GitHub Actions gates |
 
 > **Beta commerce notice:** purchases are approved immediately for demonstration. ENAcademy does not contact an Iranian payment gateway and does not collect or store banking/card information.
 
@@ -46,6 +47,7 @@ flowchart LR
     API --> Mail[Mailpit / SMTP]
     API --> PDF[Persian invoice renderer]
     API --> Books[Protected book resources]
+    API --> Exams[Timed exam and grading domain]
 ```
 
 - **Next.js** owns the responsive bilingual experience and authenticated workspaces.
@@ -67,6 +69,8 @@ flowchart LR
     Access -- Course --> Learn[Unlock course level]
     Access -- Book --> Download[Protected PDF download]
     Learn --> Progress[Persist score, XP, words, and progress]
+    Progress --> Exam[Take server-timed course exam]
+    Exam --> Result[Autosave, submit, and review result]
 ```
 
 Every checkout is atomic: ENAcademy creates the approved order, immutable item snapshots, one invoice, and all related entitlements together. If any operation fails, PostgreSQL rolls back the complete purchase.
@@ -110,6 +114,22 @@ Stopping the stack does not delete PostgreSQL data. Copy `.env.example` to `.env
 3. Sign in as the administrator configured by `APP_ADMIN_EMAIL` and `APP_ADMIN_PASSWORD`.
 4. Approve the verified student.
 5. The student can sign in, use the Store, obtain course/book access, and continue learning.
+6. The purchased course also unlocks its online exam; answers autosave and the server produces the final score.
+
+If the original verification message is lost, the student can request a fresh link without revealing whether arbitrary addresses have accounts. The sign-in screen also provides a one-time password-reset flow; completing it revokes every existing refresh session for that account.
+
+## Online exam capacity
+
+The exam workflow is engineered for a target of 100 simultaneous students. Attempt creation and submission are idempotent, timers are durable, saves use one batched PostgreSQL upsert, hot paths are indexed, and Spring uses bounded Hikari/Tomcat pools so a request spike cannot create an unbounded database-connection spike.
+
+Run the complete 100-user login and exam proof on a disposable local or staging environment:
+
+```bash
+./start-app.sh
+./scripts/exam-load-test.sh
+```
+
+The report prints p50/p95/max latency and fails if any learner cannot login, start/resume, save, or finalize. Hardware still matters; see [Online exams and 100-user capacity](docs/exam-capacity.md) for sizing assumptions, acceptance criteria, exact optimizations, and limitations.
 
 ## Technology choices
 
@@ -121,8 +141,9 @@ Stopping the stack does not delete PostgreSQL data. Copy `.env.example` to `.env
 | Redis | Fast expiring counters for login protection without polluting permanent data |
 | Flyway | Versioned, repeatable database evolution instead of uncontrolled automatic schema changes |
 | Docker Compose | One-command reproducible development and deployment-shaped environments |
-| Mailpit | Safe local inspection of verification email without sending real messages |
-| GitHub Actions | Independent backend, frontend, and container checks for every pushed change and pull request |
+| Mailpit | Safe local inspection of verification and password-reset email without sending real messages |
+| Playwright | Exercises the complete registration, approval, login, recovery, purchase, completion, and suspension path in a real Chromium browser |
+| GitHub Actions | Independent backend/frontend checks followed by a production-like Compose and browser workflow on every push or pull request |
 
 ## Repository map
 
@@ -133,7 +154,8 @@ docs/system-guide.md       Complete architecture, workflows, diagrams, decisions
 docs/database.md           Database tables, relationships, persistence, backups, and inspection
 docs/architecture.md       Focused architecture summary
 docs/security.md           Security model and production checklist
-scripts/                   Curriculum export and deterministic demo-book generation
+docs/exam-capacity.md      Online-exam workflow, concurrency design, tuning, and 100-user proof
+scripts/                   Curriculum/books plus isolated exam load fixture and runner
 docker-compose.yml         Full local platform topology
 start-app.sh / stop-app.sh Friendly lifecycle commands
 ```
@@ -144,6 +166,7 @@ start-app.sh / stop-app.sh Friendly lifecycle commands
 - [Database guide](docs/database.md) — what is stored, where it lives, how tables relate, and how to inspect or back it up
 - [Architecture](docs/architecture.md) — concise component and deployment view
 - [Security](docs/security.md) — authentication, authorization, secrets, headers, and deployment checklist
+- [Online exams and 100-user capacity](docs/exam-capacity.md) — timed workflow, concurrency guarantees, runtime tuning, load-test commands, acceptance criteria, and limits
 - [Contributing](CONTRIBUTING.md) — local workflow and quality expectations
 
 ## Development
@@ -177,8 +200,8 @@ docker compose config --quiet
 docker compose build
 ```
 
-GitHub Actions independently runs the Spring tests, frontend regression tests, lint, TypeScript checks, production build, Compose validation, and container image builds.
+GitHub Actions independently runs Spring integration tests, frontend regression tests, lint, TypeScript checks, the production build, then starts the complete Compose platform and executes the Playwright lifecycle test in Chromium.
 
 ## Project status
 
-ENAcademy is an actively developed portfolio and future open-source project. Its commerce workflow is intentionally simulated; production payments, tax compliance, refunds, object storage, observability, backups, and deployment hardening remain explicit future work.
+ENAcademy is an actively developed portfolio and future open-source project. Its commerce workflow is intentionally simulated. The online-exam code and repeatable 100-user harness provide a measurable capacity target, not a hardware-independent guarantee. HTTPS deployment is intentionally not configured because no domain/host has been selected; production payments, tax compliance, refunds, proctoring, high availability, object storage, central monitoring, backups, and deployment-specific hardening remain future work.

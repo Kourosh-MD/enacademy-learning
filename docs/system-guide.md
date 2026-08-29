@@ -55,7 +55,7 @@ The platform is more than a visual demonstration. Accounts, verification tokens,
 ### Current non-goals
 
 - It is not yet a multi-school or multi-tenant learning management system.
-- It does not yet contain payments, certificates, instructor authoring, or live classes.
+- It does not yet contain a real payment gateway, certificates, instructor authoring, or live classes; the current store is an explicitly simulated beta checkout.
 - Speech recognition uses browser capabilities; it is not a phoneme-level pronunciation engine.
 - Persian localization translates the interface, not the English material being taught.
 
@@ -102,6 +102,8 @@ The platform is more than a visual demonstration. Accounts, verification tokens,
 
 - Account registration with validated credentials.
 - One-time email verification.
+- Verification-email resend with a neutral privacy-preserving response.
+- One-time password reset that revokes prior refresh sessions.
 - Administrator approval requirement.
 - Authenticated dashboard.
 - Sequential lesson unlocking.
@@ -115,6 +117,8 @@ The platform is more than a visual demonstration. Accounts, verification tokens,
 - Immediate simulated checkout with no real payment gateway.
 - Automatic purchased-course unlock and protected book downloads.
 - Purchase history and downloadable Persian PDF invoices.
+- Bilingual A1/A2 online exam center for entitled students.
+- Server-enforced exam deadlines, resume support, debounced batch autosave, automatic timeout submission, immediate results, and answer explanations.
 
 ### Administrator experience
 
@@ -126,12 +130,13 @@ The platform is more than a visual demonstration. Accounts, verification tokens,
 - Prevention of approval before email verification.
 - Audit events for sensitive actions.
 - Commerce control center for pricing, availability, orders, entitlements, and invoice downloads.
+- Exam control center for publication, schedules, duration, pass score, aggregate metrics, and recent attempts.
 
 ### Engineering and operations
 
 - Spring Boot REST API.
 - PostgreSQL durable storage.
-- Redis login throttling.
+- Redis throttling for login, verification resend, and password-reset requests.
 - Flyway schema migrations.
 - Docker Compose stack.
 - Mailpit local email testing.
@@ -139,6 +144,9 @@ The platform is more than a visual demonstration. Accounts, verification tokens,
 - Health, readiness, liveness, and Prometheus endpoints.
 - GitHub Actions quality gates.
 - Safe start and stop scripts.
+- Bounded database/request pools and an isolated 100-user login-and-exam load harness.
+- Scheduled token cleanup, nonce-based browser security headers, and structured request-correlated logs.
+- Playwright/Chromium end-to-end coverage of registration through suspension in GitHub Actions.
 
 ### Teaching section — Implemented capabilities
 
@@ -148,7 +156,7 @@ The platform is more than a visual demonstration. Accounts, verification tokens,
 - Distinguish a user-visible capability from the infrastructure that supports it.
 - Verify claims against an observable screen, API, database record, or CI result.
 
-**Lesson.** A capability is complete only when its full path works. For example, email verification includes the registration form, token creation, message delivery, verification endpoint, database update, and user feedback. Likewise, purchasing includes preview, validation, order and invoice creation, entitlement delivery, history, and protected download.
+**Lesson.** A capability is complete only when its full path works. For example, email verification includes the registration form, token creation, message delivery, verification endpoint, database update, and user feedback. Purchasing includes preview, validation, order and invoice creation, entitlement delivery, history, and protected download. Online examination includes entitlement, atomic attempt creation, durable timing, validated batch saves, idempotent submission, server grading, review, admin controls, and a measured capacity test.
 
 **Guided practice**
 
@@ -156,6 +164,7 @@ The platform is more than a visual demonstration. Accounts, verification tokens,
 2. Identify its entry screen, backend rule, stored data, and failure state.
 3. Mark which capabilities require authentication, approval, ownership, or ADMIN role.
 4. Compare the visible feature list with `/docs`, the database tables, and the relevant UI route.
+5. Run the isolated exam load harness and distinguish a design target from measured capacity on a particular host.
 
 **Success check.** For any feature claim, you can point to both a user-facing result and an authoritative backend or operational result.
 
@@ -259,9 +268,9 @@ Controllers translate HTTP requests into validated service calls. Services own b
 | Component | Responsibility | Data owned |
 | --- | --- | --- |
 | Browser | Renders UI, holds the short-lived access token in memory, runs optional speech APIs, and stores display preferences | In-memory JWT and non-sensitive preferences |
-| Next.js | Public pages, login, dashboard, admin UI, lessons, localization, theming, and API proxying | No authoritative account or progress data |
-| Spring Boot | Identity, authorization, approval, learning rules, progress, words, audits, and error contracts | Authoritative application behavior |
-| PostgreSQL | Durable source of truth | Users, token hashes, curriculum, progress, saved words, audits |
+| Next.js | Public pages, login, dashboard, admin UI, lessons/exams, localization, theming, autosave coordination, and API proxying | No authoritative account, timing, answer, or progress data |
+| Spring Boot | Identity, authorization, approval, learning/exam rules, timing, grading, progress, words, audits, and error contracts | Authoritative application behavior |
+| PostgreSQL | Durable source of truth | Users, token hashes, curriculum, progress, exams, attempts, answers, results, commerce, saved words, audits |
 | Redis | Fast disposable login throttling | Temporary login keys with TTL |
 | SMTP/Mailpit | Verification email delivery or local capture | Development mail in Mailpit |
 | Flyway | Ordered schema history | Migration records |
@@ -483,15 +492,50 @@ Each checkout is one purchase and creates exactly one invoice in the same databa
 
 The item name and price are copied into immutable order-item snapshots at checkout. A later catalog edit therefore cannot rewrite an older invoice. PostgreSQL enforces `invoices.order_id` as unique, while the service creates the order, invoice, item snapshots, and entitlements atomically; a failure rolls back the complete purchase instead of leaving a partial invoice or partial access grant.
 
+### 5.7 Online exam, autosave, and grading
+
+~~~mermaid
+sequenceDiagram
+    actor Student
+    participant Web as Exam player
+    participant API as ExamService
+    participant DB as PostgreSQL
+
+    Student->>API: POST /exams/{slug}/attempts
+    API->>DB: Check approval, course entitlement, publication, window
+    API->>DB: INSERT attempt ON CONFLICT return existing
+    DB-->>Web: Questions without answers plus durable deadline
+    loop Answers change
+        Web->>Web: Debounce and group dirty answers
+        Web->>API: PATCH /attempts/{id}/answers
+        API->>DB: Lock attempt, validate, one batch upsert
+        DB-->>Web: Version, saved time, remaining seconds
+    end
+    alt Student submits in time
+        Student->>API: POST /attempts/{id}/submit
+    else Deadline reached
+        Web->>API: POST /attempts/{id}/submit
+        API->>API: Select AUTO_SUBMITTED
+    end
+    API->>DB: Lock attempt and aggregate grade once
+    DB-->>Web: Score, percentage, pass/fail, explanations
+~~~
+
+Only an email-verified, approved `STUDENT` with an entitlement for the exam's course level can list/start that exam. A unique `(exam_id,user_id)` constraint and conflict-safe insertion produce one attempt even when start is clicked twice. The attempt's `deadline_at` is stored once; the browser countdown is presentation, while Spring/PostgreSQL remain authoritative.
+
+The player keeps changed answers locally, waits briefly for additional changes, and sends one request containing up to 100 answers. Spring locks the attempt row, verifies that each question and option belongs to the exam, and converts the request JSON into one PostgreSQL upsert. Submission uses the same row lock, calculates the total with one aggregate query, and is idempotent. Active responses never contain correct options; finalized responses add the correct options and bilingual explanations.
+
+The admin can schedule/publish the two seeded exams, change duration/pass score, inspect aggregate metrics, and see recent attempts. A1 and A2 each ship with six complete bilingual questions. This release deliberately does not include arbitrary question authoring, randomized banks, multiple attempts, essays, or proctoring.
+
 ### Teaching section — Application workflows
 
 **Learning goals**
 
-- Follow registration, account state, session refresh, administration, learning, and commerce workflows.
+- Follow registration, account state, session refresh, administration, learning, commerce, and online-exam workflows.
 - Identify validation, authorization, transaction, audit, and rollback points.
 - Predict safe outcomes when a step fails.
 
-**Lesson.** Workflows are state transitions, not just page sequences. Registration creates a pending student; verification proves mailbox control; approval grants platform admission. Login creates two kinds of session material. Lesson completion rechecks access before an idempotent upsert. Checkout creates the order, immutable item rows, invoice, and entitlements atomically.
+**Lesson.** Workflows are state transitions, not just page sequences. Registration creates a pending student; verification proves mailbox control; approval grants platform admission. Login creates two kinds of session material. Lesson completion rechecks access before an idempotent upsert. Checkout creates the order, immutable item rows, invoice, and entitlements atomically. An exam moves once from in-progress to submitted/auto-submitted while repeated starts and submits safely return the same durable attempt.
 
 **Guided practice**
 
@@ -500,6 +544,7 @@ The item name and price are copied into immutable order-item snapshots at checko
 3. Explain the expected response when an unverified student is approved, a locked lesson is submitted, or an owned product is purchased again.
 4. For a two-product checkout, list every row created and show why one invoice contains two item lines.
 5. Identify the audit event produced by each sensitive successful workflow.
+6. Simulate two start requests and a save racing a submit; explain which unique constraint, transaction, and row lock preserve correctness.
 
 **Success check.** You can state the preconditions, state changes, result, and rollback behavior for every workflow in section 5.
 
@@ -542,10 +587,11 @@ The 72-character maximum matches BCrypt's practical input boundary.
 ### Email tokens
 
 - Cryptographically random and single-use.
-- Raw token exists only in the verification link.
+- Raw token exists only in a verification or password-reset link.
 - SHA-256 hash is stored in PostgreSQL.
-- Default expiration is 24 hours.
+- Verification expires after 24 hours; password reset defaults to 60 minutes.
 - A used timestamp prevents reuse.
+- A successful password reset revokes every refresh token for that user.
 
 ### Token, secret, and credential linkage
 
@@ -577,7 +623,8 @@ flowchart LR
 | --- | --- | --- | --- | --- | --- |
 | Access JWT | `AuthService.createSession` signs it with HS256 | Module memory only; never local storage | Not persisted | 15 minutes by default; sent as `Authorization: Bearer ...` | `frontend/components/AuthProvider.tsx`, `backend/.../config/SecurityConfig.java` |
 | Refresh token | `SecureRandom` creates 32 bytes and URL-safe Base64 encodes them | Raw value in the `enacademy_refresh` HttpOnly cookie | SHA-256 hash in `refresh_tokens` | 14 days by default; consumed and replaced on every refresh | `AuthService`, `AuthController`, `TokenRepository`, `AuthProvider` |
-| Email-verification token | Registration creates the same 32-byte random form | Raw value appears once in the emailed `/verify?token=...` link | SHA-256 hash in `email_verification_tokens` | 24 hours, single use, then `used_at` prevents reuse | `AuthService`, `VerificationMailer`, `frontend/app/verify/page.tsx` |
+| Email-verification token | Registration/resend creates the same 32-byte random form | Raw value appears once in the emailed `/verify?token=...` link | SHA-256 hash in `email_verification_tokens` | 24 hours, single use; resend invalidates the prior unused token | `AuthService`, `VerificationMailer`, verification/resend pages |
+| Password-reset token | Recovery creates 32 random bytes and URL-safe Base64 encodes them | Raw value appears once in `/reset-password?token=...` | SHA-256 hash in `password_reset_tokens` | 60 minutes by default, single use; successful use revokes refresh sessions | `AuthService`, `VerificationMailer`, reset/forgot pages |
 | JWT signing secret | Operator supplies `JWT_SECRET` | Never sent to the browser | Environment/configuration only | Long-lived per environment; minimum 32 bytes; signs and verifies access JWTs | `.env`, `docker-compose.yml`, `application.yml`, `SecurityConfig` |
 | Password hash | BCrypt cost 12 after registration/admin bootstrap | No password or hash is returned | `users.password_hash` | Credential verifier, not an API token | `AuthService`, `PasswordEncoder`, user repository |
 | Login rate-limit key | `RateLimitService` derives a non-reversible key from email/IP context | None | Expiring Redis key such as `login:<hash>` | 15-minute protection window; not an authentication credential | `RateLimitService`, Redis |
@@ -592,9 +639,9 @@ The application uses no payment-gateway API key, bank token, Google API key, spe
 
 Exact implementation links:
 
-- [AuthService](../backend/src/main/java/com/enacademy/auth/AuthService.java) creates access, refresh, and verification tokens and hashes opaque tokens.
+- [AuthService](../backend/src/main/java/com/enacademy/auth/AuthService.java) creates access, refresh, verification, and password-reset tokens and hashes opaque tokens.
 - [AuthController](../backend/src/main/java/com/enacademy/auth/AuthController.java) sets, rotates, and expires the refresh cookie.
-- [TokenRepository](../backend/src/main/java/com/enacademy/auth/TokenRepository.java) persists and consumes verification/refresh hashes.
+- [TokenRepository](../backend/src/main/java/com/enacademy/auth/TokenRepository.java) persists, consumes, revokes, and cleans verification/refresh/reset hashes.
 - [SecurityConfig](../backend/src/main/java/com/enacademy/config/SecurityConfig.java) validates JWTs, maps roles, and protects routes.
 - [AuthProvider](../frontend/components/AuthProvider.tsx) holds the access JWT, adds bearer headers, refreshes once after 401, and handles protected downloads.
 - [application.yml](../backend/src/main/resources/application.yml), [docker-compose.yml](../docker-compose.yml), and [.env.example](../.env.example) link token lifetimes, issuer, secret, and cookie settings into the runtime.
@@ -603,7 +650,7 @@ Exact implementation links:
 
 | Resource | Rule |
 | --- | --- |
-| Registration, verification, login, refresh, logout | Public |
+| Registration, verification/resend, password recovery, login, refresh, logout | Public |
 | Health and API documentation | Public in current configuration |
 | Curriculum summary | Public GET |
 | Dashboard, lessons, words | Authenticated plus database approval check |
@@ -735,6 +782,11 @@ erDiagram
     PRODUCTS ||--o{ PRODUCT_ENTITLEMENTS : grants
     COURSE_MODULES ||--o{ LESSONS : contains
     LESSONS ||--o{ LESSON_PROGRESS : records
+    USERS ||--o{ EXAM_ATTEMPTS : takes
+    EXAMS ||--o{ EXAM_QUESTIONS : contains
+    EXAMS ||--o{ EXAM_ATTEMPTS : receives
+    EXAM_ATTEMPTS ||--o{ EXAM_ANSWERS : saves
+    EXAM_QUESTIONS ||--o{ EXAM_ANSWERS : answers
 
     USERS {
         uuid id PK
@@ -790,6 +842,39 @@ erDiagram
         varchar action
         jsonb details
     }
+    EXAMS {
+        uuid id PK
+        varchar slug UK
+        varchar level
+        integer duration_minutes
+        integer passing_score
+        timestamptz starts_at
+        timestamptz ends_at
+        boolean published
+    }
+    EXAM_QUESTIONS {
+        uuid id PK
+        uuid exam_id FK
+        integer position
+        jsonb options
+        varchar correct_option
+        integer points
+    }
+    EXAM_ATTEMPTS {
+        uuid id PK
+        uuid exam_id FK
+        uuid user_id FK
+        varchar status
+        timestamptz deadline_at
+        integer percentage
+        integer version
+    }
+    EXAM_ANSWERS {
+        uuid attempt_id PK, FK
+        uuid question_id PK, FK
+        varchar selected_option
+        timestamptz saved_at
+    }
 ~~~
 
 ### Table responsibilities
@@ -799,6 +884,7 @@ erDiagram
 | users | Identity, role, approval, verification | Unique email and constrained role/status |
 | email_verification_tokens | Mailbox-control proof | Unique hash, expiration, used time |
 | refresh_tokens | Rotating sessions | Unique hash, expiration, revocation |
+| password_reset_tokens | One-time account recovery | Unique hash, expiration, used time, user cascade |
 | course_modules | Ordered module metadata | Unique unit and position |
 | lessons | Lesson metadata and activities | Module FK, JSONB content, order index |
 | lesson_progress | Per-user lesson result | Unique user/lesson, score 0–100 |
@@ -808,11 +894,15 @@ erDiagram
 | purchase_order_items | Immutable purchased product snapshots | Order/product FKs and positive quantities |
 | invoices | Invoice identity and issue time | Unique order and number |
 | product_entitlements | Course/book ownership | Unique user/product and granting order |
+| exams | Bilingual exam schedule and scoring rules | Unique slug, constrained level/duration/pass/window |
+| exam_questions | Ordered multiple-choice content and server answer key | Unique exam/position, JSONB option count, points |
+| exam_attempts | Durable deadline, status, version, grade, and result | Unique exam/user and active/final consistency checks |
+| exam_answers | Latest answer per attempt/question | Composite primary key and foreign keys |
 | audit_events | Security and product history | Actor reference and JSONB details |
 
 ### Why relational columns plus JSONB
 
-Identity, ownership, uniqueness, ordering, and reporting use relational columns and constraints. Flexible lesson activities use JSONB. This avoids many exercise-specific tables without giving up relational integrity for the important domain.
+Identity, ownership, uniqueness, ordering, timing, grades, and reporting use relational columns and constraints. Flexible lesson activities and the bounded option array for each exam question use JSONB. This avoids many activity/option-specific tables without giving up relational integrity for the important domain.
 
 ### Cascades and retention
 
@@ -834,7 +924,7 @@ PostgreSQL stores timezone-aware timestamps and the backend uses UTC. This avoid
 - Choose relational columns or JSONB intentionally.
 - Reason about constraints, cascades, retention, transactions, and time.
 
-**Lesson.** The schema encodes invariants that must survive application bugs and concurrent requests. Foreign keys protect relationships, unique constraints prevent duplicates, checks limit valid values, and transactions keep multi-row workflows atomic. JSONB is reserved for flexible lesson activities; identity, ownership, money, ordering, and reporting remain relational.
+**Lesson.** The schema encodes invariants that must survive application bugs and concurrent requests. Foreign keys protect relationships, unique constraints prevent duplicates, checks limit valid values, and transactions keep multi-row workflows atomic. JSONB is reserved for flexible lesson activities and bounded exam option documents; identity, ownership, money, exam timing/results, ordering, and reporting remain relational. The attempt unique key prevents concurrent duplicate starts, while its row lock serializes save/submit state transitions.
 
 **Guided practice**
 
@@ -843,6 +933,7 @@ PostgreSQL stores timezone-aware timestamps and the backend uses UTC. This avoid
 3. Explain what survives if an audit actor is deleted and why user deletion is not currently exposed.
 4. Compare `lessons.content` JSONB with relational `lesson_progress`.
 5. Convert a stored UTC timestamp into a display timezone without changing the stored fact.
+6. Find every exam hot-path index and match it to list, resume, monitor, deadline, or grading behavior.
 
 **Success check.** You can review a proposed schema change for integrity, concurrency, deletion, retention, indexing, and migration impact.
 
@@ -864,6 +955,9 @@ Base path: /api/v1
 | --- | --- | --- |
 | POST | /auth/register | Create pending student and send verification |
 | POST | /auth/verify | Consume verification token |
+| POST | /auth/verification/resend | Send a fresh link when verification is still required |
+| POST | /auth/password/forgot | Request a neutral-response one-time reset email |
+| POST | /auth/password/reset | Consume reset token, change password, and revoke sessions |
 | POST | /auth/login | Create session |
 | POST | /auth/refresh | Rotate refresh token and return JWT |
 | POST | /auth/logout | Revoke session and expire cookie |
@@ -901,6 +995,18 @@ Base path: /api/v1
 | GET | /store/invoices/{id}/pdf | Download owned Persian invoice |
 | GET | /store/books/{productId}/download | Download an owned book |
 
+### Online exams
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | /exams | List entitled/locked exams and current result/attempt state |
+| POST | /exams/{slug}/attempts | Atomically start or resume the student's one attempt |
+| GET | /exams/attempts/{attemptId} | Resume with saved answers and server time |
+| PATCH | /exams/attempts/{attemptId}/answers | Validate and batch-upsert changed answers |
+| POST | /exams/attempts/{attemptId}/submit | Idempotently manual/auto-submit, grade, and return review |
+| GET | /admin/exams | Return schedules, metrics, and recent attempts |
+| PATCH | /admin/exams/{examId} | Change publication, window, duration, and pass score |
+
 ### API integration and linkage map
 
 ~~~mermaid
@@ -926,15 +1032,15 @@ The browser always uses relative `/api/v1/...` URLs. `frontend/next.config.ts` r
 
 | API or integration | What it is used for | Frontend/backend linkage | Credential or token |
 | --- | --- | --- | --- |
-| ENAcademy REST API | Authentication, learning, administration, store, purchases, invoices, and downloads | Relative calls from pages and `AuthProvider` → Next.js rewrite → Spring controllers under `/api/v1` | Bearer access JWT on protected calls; refresh cookie only on auth refresh/logout |
+| ENAcademy REST API | Authentication, learning, online exams, administration, store, purchases, invoices, and downloads | Relative calls from pages and `AuthProvider` → Next.js rewrite → Spring controllers under `/api/v1` | Bearer access JWT on protected calls; refresh cookie only on auth refresh/logout |
 | OpenAPI/Swagger UI | Interactive backend contract documentation | Springdoc exposes `/docs` and `/v3/api-docs` directly from the backend | Public in the current local configuration; no API key |
 | Spring Actuator | Container and operator health checks | Docker health check and startup scripts call `/actuator/health` | Public health endpoint; no user token |
-| SMTP / Mailpit | Deliver or locally capture email-verification links | `VerificationMailer` → Spring Mail configuration → `MAIL_HOST`/`MAIL_PORT` | Optional SMTP credentials in deployment secrets; verification token is message content, not an SMTP credential |
+| SMTP / Mailpit | Deliver or locally capture verification and password-reset links | `VerificationMailer` → Spring Mail configuration → `MAIL_HOST`/`MAIL_PORT` | Optional SMTP credentials in deployment secrets; one-time email tokens are message content, not SMTP credentials |
 | Web Speech APIs | Lesson pronunciation playback and optional recognition | `frontend/components/LessonPlayer.tsx` calls browser `speechSynthesis` and `SpeechRecognition`/`webkitSpeechRecognition` | No ENAcademy API key; availability and remote processing depend on the user's browser |
 | Google font source through `next/font` | Obtain Manrope and Vazirmatn during the frontend build | `frontend/app/layout.tsx` → Next.js font build pipeline → bundled optimized font assets | No Google API key and no runtime browser call to Google Fonts |
 | PostgreSQL JDBC | Durable application data and transactions | Repository classes → Spring datasource → `DATABASE_URL` | Database username/password deployment credentials, never browser tokens |
-| Redis protocol | Expiring login-rate counters | `RateLimitService` → `REDIS_HOST`/`REDIS_PORT` | Internal infrastructure connection; no user session token |
-| GitHub Actions | CI for tests, type checks, builds, Compose, and containers | `.github/workflows/ci.yml` runs on push and pull request | GitHub-managed runner authorization; no application API key in source |
+| Redis protocol | Expiring login/recovery rate counters | `RateLimitService` → `REDIS_HOST`/`REDIS_PORT` | Internal infrastructure connection; no user session token |
+| GitHub Actions | CI for tests, type checks, builds, full Compose, and Chromium lifecycle E2E | `.github/workflows/ci.yml` runs on push and pull request | GitHub-managed runner authorization; no application API key in source |
 | Payment or banking API | Not used in the beta workflow | Checkout is approved inside `CommerceService`; no redirect or gateway client exists | No merchant key, bank token, card data, or gateway callback |
 | Invoice API | Not external | `InvoicePdfService` renders the Persian PDF inside Spring from PostgreSQL snapshots | Access JWT plus ownership/ADMIN check; no invoice-service token |
 
@@ -945,12 +1051,14 @@ The browser always uses relative `/api/v1/...` URLs. `frontend/next.config.ts` r
 | Registration and login | `/login`, `/verify` | Direct public fetch plus `AuthProvider` session methods | `AuthController` |
 | Dashboard, lessons, saved words | `/dashboard`, `/learn/[lessonId]` | `apiFetch` | `LearningController` |
 | Student store and purchase history | `/store`, `/purchases` | `apiFetch` and `apiDownload` | `CommerceController` |
+| Student exam center and player | `/exams`, `/exams/[attemptId]` | `apiFetch` with debounced batch saves | `ExamController` |
 | Student approval and audits | `/admin` | `apiFetch` | `AdminController` |
+| Exam operations | `/admin/exams` | `apiFetch` | `ExamAdminController` |
 | Product/order/invoice administration | `/admin/commerce` | `apiFetch` and `apiDownload` | `CommerceAdminController` |
 
 `apiFetch` and `apiDownload` add the in-memory bearer token, include cookies when appropriate, and perform one refresh-and-retry after a 401. `apiDownload` returns a `Blob` for invoices and books instead of attempting JSON parsing. Spring Security remains the real boundary: a frontend link or route redirect never grants authorization.
 
-The principal API link points are [next.config.ts](../frontend/next.config.ts) for the same-origin rewrite, [AuthProvider](../frontend/components/AuthProvider.tsx) for shared authenticated requests, [AuthController](../backend/src/main/java/com/enacademy/auth/AuthController.java), [LearningController](../backend/src/main/java/com/enacademy/learning/LearningController.java), [AdminController](../backend/src/main/java/com/enacademy/admin/AdminController.java), [CommerceController](../backend/src/main/java/com/enacademy/commerce/CommerceController.java), and [CommerceAdminController](../backend/src/main/java/com/enacademy/commerce/CommerceAdminController.java) for Spring entry points.
+The principal API link points are [next.config.ts](../frontend/next.config.ts) for the same-origin rewrite, [AuthProvider](../frontend/components/AuthProvider.tsx) for shared authenticated requests, [AuthController](../backend/src/main/java/com/enacademy/auth/AuthController.java), [LearningController](../backend/src/main/java/com/enacademy/learning/LearningController.java), [ExamController](../backend/src/main/java/com/enacademy/exam/ExamController.java), [ExamAdminController](../backend/src/main/java/com/enacademy/exam/ExamAdminController.java), [AdminController](../backend/src/main/java/com/enacademy/admin/AdminController.java), [CommerceController](../backend/src/main/java/com/enacademy/commerce/CommerceController.java), and [CommerceAdminController](../backend/src/main/java/com/enacademy/commerce/CommerceAdminController.java) for Spring entry points.
 
 ### Error contract
 
@@ -964,7 +1072,7 @@ The backend uses ProblemDetail responses with HTTP status, stable code, detail, 
 - Trace API calls from frontend routes to Spring controllers.
 - Distinguish internal APIs, browser APIs, infrastructure protocols, and absent external services.
 
-**Lesson.** The public contract starts at `/api/v1`. GET reads, POST creates or performs a command, and PATCH changes part of a resource. Next.js rewrites same-origin `/api` requests to Spring. `apiFetch` handles JSON, `apiDownload` handles binary files, and Spring Security plus service checks decide access.
+**Lesson.** The public contract starts at `/api/v1`. GET reads, POST creates or performs a command, and PATCH changes part of a resource. Next.js rewrites same-origin `/api` requests to Spring. `apiFetch` handles JSON, `apiDownload` handles binary files, and Spring Security plus service checks decide access. Exam save is a PATCH because it updates the current answer state; exam submit is a POST command because it causes a final state transition and grading.
 
 **Guided practice**
 
@@ -998,8 +1106,11 @@ The backend uses ProblemDetail responses with HTTP status, stable code, detail, 
 | /dashboard | Approved student | Purchased learning overview |
 | /store | Approved student | Course/book previews and beta checkout |
 | /purchases | Approved student | Purchases, downloads, and invoice tabs |
+| /exams | Approved student | Available/locked exams, resume state, and results |
+| /exams/[attemptId] | Entitled student | Timed player, autosave, submit, and answer review |
 | /learn/[lessonId] | Entitled student | Lesson player |
 | /admin | Administrator | Student management |
+| /admin/exams | Administrator | Exam schedule, scoring settings, metrics, and attempts |
 | /admin/commerce | Administrator | Products, orders, access, and invoices |
 
 ### Session provider
@@ -1020,7 +1131,7 @@ Client redirects are only user experience. Spring Security is the authorization 
 - Root language and direction change dynamically.
 - Persian uses RTL layout.
 - Curriculum titles and objectives have Persian interface copies.
-- English teaching material stays English by design.
+- English teaching material stays English by design; exam prompts/options/explanations have explicit English and Persian fields.
 
 ### Theme system
 
@@ -1074,6 +1185,7 @@ CSS design tokens are not authentication tokens. Theme choices never enter the a
 - Reduced-motion support.
 - Speech fallback when browser recognition is absent.
 - Accessible labels and selection state on display controls.
+- Exam question palette, focusable answer choices, responsive player, save-state text, low-time warning, reload-safe resume, and explicit final confirmation.
 
 ### Teaching section — Frontend architecture
 
@@ -1083,7 +1195,7 @@ CSS design tokens are not authentication tokens. Theme choices never enter the a
 - Trace a theme or language change across providers and CSS.
 - Keep sensitive state separate from display preferences.
 
-**Lesson.** `app/layout.tsx` is the composition root: it loads styles/fonts and mounts preference and auth providers. `AuthProvider` manages volatile session behavior. `PreferencesProvider` validates non-sensitive local preferences, updates root attributes, and supplies translations. Semantic CSS tokens allow the same components to react to mode and accent without hard-coded per-page themes.
+**Lesson.** `app/layout.tsx` is the composition root: it loads styles/fonts and mounts preference and auth providers. `AuthProvider` manages volatile session behavior. `PreferencesProvider` validates non-sensitive local preferences, updates root attributes, and supplies translations. Semantic CSS tokens allow the same components to react to mode and accent without hard-coded per-page themes. The exam player keeps transient dirty answers in memory but treats server responses as authoritative, warns before unloading unsaved work, and reconstructs the entire attempt after refresh.
 
 **Guided practice**
 
@@ -1092,6 +1204,7 @@ CSS design tokens are not authentication tokens. Theme choices never enter the a
 3. Reload and confirm the early script prevents an obvious theme flash.
 4. Navigate to a lesson and verify the preference dock uses its collision-safe lesson position.
 5. Disable speech recognition or reduced motion and observe the fallback behavior.
+6. Start an exam, answer rapidly, inspect the single grouped PATCH, reload, and confirm answers and remaining time resume from the server.
 
 **Success check.** You can add a component using semantic tokens and translated labels without storing credentials, duplicating theme colors, or breaking RTL.
 
@@ -1154,6 +1267,14 @@ Health dependencies prevent the API from racing its infrastructure and prevent t
 
 The stop script removes containers and the network but preserves named volumes. Normal stop/start cycles keep learner data.
 
+### Capacity controls and the 100-user exam target
+
+The default Spring runtime bounds Hikari at 30 database connections and Tomcat at 200 request threads, 200 queued requests, and 1,000 accepted connections. Five database connections and 20 request threads stay warm. This lets 100 students arrive together without creating an unbounded PostgreSQL connection storm. Response compression is enabled and normal shutdown is graceful so in-flight saves can finish.
+
+Application structure reduces per-student work: one atomic attempt insertion, indexed reads, debounced browser saves, one JSONB batch answer upsert, and one aggregate grading query. Redis rate limiting keys include normalized email and IP, so 100 different load-test accounts behind one test runner do not incorrectly share one login counter. BCrypt remains intentionally CPU-heavy and is expected to be the slowest phase.
+
+Run `./scripts/exam-load-test.sh` only against disposable local/staging data. It recreates 100 isolated `@enacademy.loadtest` students and executes login, list, start, save, and submit concurrently with latency/error reporting. The detailed assumptions, acceptance criteria, tuning variables, and limitations live in [Online exams and 100-user capacity](exam-capacity.md). Source tuning is not a hardware-independent guarantee; release evidence must come from the target-sized host.
+
 ### Teaching section — Docker and runtime architecture
 
 **Learning goals**
@@ -1162,7 +1283,7 @@ The stop script removes containers and the network but preserves named volumes. 
 - Distinguish build-time and runtime dependencies.
 - Operate the stack without accidentally deleting data.
 
-**Lesson.** Compose starts infrastructure first, waits for health, then starts Spring, waits for readiness, and finally starts Next.js. Internal service names connect containers; only user/operator endpoints are published. Multi-stage builds discard compilers and caches from runtime images, while non-root users reduce container privilege.
+**Lesson.** Compose starts infrastructure first, waits for health, then starts Spring, waits for readiness, and finally starts Next.js. Internal service names connect containers; only user/operator endpoints are published. Multi-stage builds discard compilers and caches from runtime images, while non-root users reduce container privilege. Bounded pools create backpressure: excess work waits within defined limits instead of consuming unlimited database connections or threads.
 
 **Guided practice**
 
@@ -1171,6 +1292,7 @@ The stop script removes containers and the network but preserves named volumes. 
 3. Trace `frontend → backend → postgres/redis/mailpit` using Compose service names.
 4. Read both Dockerfiles and label each stage as dependency, build, or runtime.
 5. Run `./stop-app.sh`, restart, and confirm learner data remains because named volumes were preserved.
+6. Run the exam load harness, save its p95/error report, and correlate any miss with CPU, pool, database, memory, or network signals before changing configuration.
 
 **Success check.** You can diagnose whether a startup failure belongs to infrastructure health, backend readiness, frontend health, image build, network wiring, or configuration.
 
@@ -1236,7 +1358,7 @@ Local storage was rejected for auth tokens because it is persistent and directly
 
 ### GitHub Actions
 
-Automated checks run outside the developer machine. Backend and frontend jobs run independently; container validation waits for both. The workflow supports pushes to main and pull requests.
+Automated checks run outside the developer machine. Backend and frontend jobs run independently; the final job builds and starts the complete Compose platform, installs Chromium, and uses Playwright to test registration, resend, approval, login, password reset, purchase, lesson completion, and suspension. The workflow supports pushes to main and pull requests.
 
 ### Mermaid in Markdown
 
@@ -1291,6 +1413,12 @@ GitHub renders Mermaid directly. Diagrams remain searchable, reviewable text and
 - Environment-driven secrets.
 - Audit events for sensitive workflows.
 - Generic login credential errors.
+- Neutral responses for verification resend and password-reset requests.
+- Independent SHA-256-keyed Redis limits for login and both recovery actions.
+- One-time password reset with all-session refresh revocation.
+- Daily configurable token cleanup.
+- Per-request CSP nonce and defensive Next.js/Spring browser headers.
+- Structured request logs and `X-Request-ID` correlation in logs, responses, and errors.
 
 ### Trust boundaries
 
@@ -1309,12 +1437,11 @@ Client-side locks improve usability but never replace server enforcement.
 ### Production requirements
 
 - Replace every development secret.
-- Use HTTPS and secure cookies.
+- Choose a domain/host, then deploy behind HTTPS and enable secure cookies. This was intentionally skipped until that infrastructure exists.
 - Restrict CORS to exact origins.
 - Configure trusted reverse-proxy headers.
 - Use authenticated TLS SMTP.
 - Keep PostgreSQL and Redis private.
-- Add CSP and edge security headers.
 - Add dependency, secret, and image scanning.
 - Define personal-data and audit retention.
 - Test database restoration.
@@ -1324,9 +1451,8 @@ Client-side locks improve usability but never replace server enforcement.
 
 - Compose defaults are local only.
 - CSRF is disabled; the current design relies on bearer auth and a strict same-site refresh cookie. Cross-origin cookie changes need a new review.
-- The rate key uses a compact Java hash and can theoretically collide. Production hardening should use SHA-256 or HMAC.
 - Individual JWTs cannot be revoked before their short expiration.
-- No password reset, MFA, breached-password check, or admin session manager exists.
+- No MFA, breached-password check, email-change flow, or admin session manager exists.
 - Audit data is append-only through current APIs, but database-level immutability permissions are not configured.
 
 ### Teaching section — Security design
@@ -1363,6 +1489,8 @@ Spring Boot Actuator exposes health, readiness, liveness, info, and Prometheus m
 
 Springdoc provides OpenAPI and Swagger UI at /docs.
 
+Every API request receives or validates `X-Request-ID`. `CorrelationIdFilter` returns it to the caller, stores it in the SLF4J MDC, and writes a structured completion event containing method, path without query data, status, and duration. Spring Boot emits Logstash-compatible JSON by default. Passwords, cookies, bearer tokens, request bodies, and email-link query strings are not logged. Unexpected exceptions are logged with that request ID while the browser receives a generic safe ProblemDetail containing the same ID.
+
 Expected business failures use ProblemDetail. Examples include:
 
 - EMAIL_ALREADY_REGISTERED
@@ -1371,10 +1499,20 @@ Expected business failures use ProblemDetail. Examples include:
 - EMAIL_NOT_VERIFIED
 - AWAITING_APPROVAL
 - LOGIN_RATE_LIMITED
+- PASSWORD_RESET_RATE_LIMITED
+- VERIFICATION_RESEND_RATE_LIMITED
+- INVALID_PASSWORD_RESET_TOKEN
 - ACCOUNT_NOT_APPROVED
 - LESSON_LOCKED
 - STUDENT_NOT_FOUND
 - VALIDATION_FAILED
+- EXAM_NOT_FOUND
+- EXAM_NOT_AVAILABLE
+- EXAM_EMPTY
+- ATTEMPT_NOT_FOUND
+- COURSE_REQUIRED
+- DUPLICATE_ANSWER
+- INVALID_EXAM_ANSWER
 
 The frontend currently displays server detail. A future improvement should map stable codes to translated UI messages.
 
@@ -1393,8 +1531,8 @@ The frontend currently displays server detail. A future improvement should map s
 1. Inspect `/actuator/health`, readiness, liveness, `/actuator/prometheus`, `/v3/api-docs`, and `/docs` locally.
 2. Produce one validation failure, one unauthorized request, one forbidden workflow, and one conflict.
 3. Record status, stable code, detail, field errors, and expected frontend behavior.
-4. Design a correlation-ID path from reverse proxy to Spring logs without logging JWTs, passwords, cookies, or verification links.
-5. Choose alerts for API readiness, database failure, error rate, login throttling, and checkout failure.
+4. Send a safe `X-Request-ID`, observe it in the response and structured log, and verify that JWTs, passwords, cookies, query strings, and verification links are absent.
+5. Choose alerts for API readiness, database failure, error rate, login throttling, checkout failure, database-pool wait/timeouts, and exam submit/autosave failures.
 
 **Success check.** You can tell whether a failure is user-correctable, security-related, dependency-related, or a code defect and know which signal to inspect.
 
@@ -1434,6 +1572,7 @@ npm ci
 npm run lint
 npm run typecheck
 npm run build
+npm run test:e2e # requires the running full stack and local Mailpit
 
 cd ..
 docker compose config --quiet
@@ -1448,9 +1587,10 @@ flowchart TD
     Event --> Frontend[Node 22, install, lint, type-check, build]
     Backend --> Gate{Both pass?}
     Frontend --> Gate
-    Gate -- Yes --> Containers[Validate Compose and build images]
+    Gate -- Yes --> Containers[Validate and start full Compose stack]
     Gate -- No --> Fail[Workflow fails]
-    Containers --> Success[Workflow succeeds]
+    Containers --> Browser[Playwright Chromium lifecycle test]
+    Browser --> Success[Workflow succeeds]
 ~~~
 
 ### Open-source collaboration
@@ -1608,11 +1748,22 @@ This permanently removes local application data unless a backup exists. It is no
 | JWT_ISSUER | JWT issuer | Stable per environment |
 | JWT_ACCESS_MINUTES | Access lifetime | Default 15 |
 | JWT_REFRESH_DAYS | Refresh lifetime | Default 14 |
+| PASSWORD_RESET_MINUTES | One-time reset lifetime | Default 60 |
+| TOKEN_RETENTION_DAYS | Retention after token use/revocation | Default 7 |
+| TOKEN_CLEANUP_CRON | UTC scheduled cleanup expression | Default daily at 03:20 UTC |
+| LOG_STRUCTURED_FORMAT | Spring console log format | Default `logstash` JSON |
 | APP_COOKIE_SECURE | Secure cookie flag | True with HTTPS |
 | ALLOWED_ORIGINS | CORS allowlist | Exact frontend origins |
 | BACKEND_URL | Next.js proxy destination | Docker service URL locally |
 | SITE_URL | Metadata base | Public deployed origin |
 | ENACADEMY_START_TIMEOUT | Health wait seconds | Default 240 |
+| DB_POOL_MAX | Maximum Hikari database connections | Default 30; budget across every app replica |
+| DB_POOL_MIN_IDLE | Warm idle database connections | Default 5 |
+| DB_POOL_CONNECTION_TIMEOUT_MS | Wait for a pooled connection | Default 5000 ms |
+| SERVER_MAX_THREADS | Maximum Tomcat request workers | Default 200 |
+| SERVER_MIN_SPARE_THREADS | Warm Tomcat workers | Default 20 |
+| SERVER_ACCEPT_COUNT | Queue when all request workers are busy | Default 200 |
+| SERVER_MAX_CONNECTIONS | Accepted Tomcat connections | Default 1000 |
 
 Never commit real environment files, secrets, backups, or database exports.
 
@@ -1624,7 +1775,7 @@ Never commit real environment files, secrets, backups, or database exports.
 - Understand where Compose, Spring, and Next.js consume each value.
 - Manage secrets without committing or displaying them.
 
-**Lesson.** Configuration separates environment facts from code. Compose wires service defaults and internal names. Spring reads database, Redis, SMTP, public URL, admin, JWT, cookie, and CORS settings. Next.js reads backend and site URLs during build/runtime as appropriate. Secrets need a secret manager or protected environment; example files contain placeholders only.
+**Lesson.** Configuration separates environment facts from code. Compose wires service defaults and internal names. Spring reads database, Redis, SMTP, public URL, admin, JWT, cookie, CORS, and bounded pool settings. Next.js reads backend and site URLs during build/runtime as appropriate. Secrets need a secret manager or protected environment; example files contain placeholders only. Capacity variables are coupled: across replicas, the sum of `DB_POOL_MAX` values must leave PostgreSQL headroom.
 
 **Guided practice**
 
@@ -1633,6 +1784,7 @@ Never commit real environment files, secrets, backups, or database exports.
 3. Use `docker compose config --quiet` to validate structure; do not paste expanded secret-bearing output into chat or logs.
 4. Compare local HTTP cookie settings with required production HTTPS settings.
 5. Build an environment matrix for local, CI, staging, and production without recording real secret values.
+6. Given three Spring replicas with `DB_POOL_MAX=30`, calculate the 90 application connections plus PostgreSQL maintenance/monitoring headroom before accepting that topology.
 
 **Success check.** You know which values may be public, which are sensitive, which require restart/rebuild, and which component reads them.
 
@@ -1648,14 +1800,14 @@ Never commit real environment files, secrets, backups, or database exports.
 
 ### Product
 
-- No password reset or email-change flow.
-- No verification-email resend endpoint.
+- No email-change flow.
 - No MFA.
 - No real payment gateway, refunds, tax integration, certificates, instructor role, or organizations. Beta orders are approved immediately.
 - No content-management UI.
 - No approval notification.
 - No admin pagination, search, or bulk actions.
 - No self-service data export or deletion.
+- Exam authoring, randomized question banks, multiple attempts, manual grading, proctoring, accommodations, and appeals are not implemented.
 
 ### Learning
 
@@ -1664,17 +1816,18 @@ Never commit real environment files, secrets, backups, or database exports.
 - Phrase matching is not formal pronunciation assessment.
 - No spaced-repetition scheduler.
 - Mastery rules remain deliberately simple.
+- The seeded A1/A2 exams contain six multiple-choice questions each and are demonstrations, not accredited CEFR certification.
 
 ### Technical
 
-- No scheduled token cleanup.
 - Audit retention is indefinite.
 - The admin UI does not yet show the existing audit API.
-- Rate limiting covers login only.
+- Rate limiting covers login and account-recovery entry points, not every application endpoint.
 - No queue, worker, CDN, or object storage.
-- No end-to-end browser suite in CI.
 - Local volumes are not production disaster recovery.
 - One HS256 secret signs tokens per environment.
+- The 100-user target must be rerun on deployment-sized hardware; the repository cannot guarantee capacity independent of CPU, memory, storage, proxy, and network.
+- The default Compose topology is a single application/database stack without high availability or zero-downtime deploy coordination.
 
 ### Teaching section — Known limitations
 
@@ -1691,8 +1844,9 @@ Never commit real environment files, secrets, backups, or database exports.
 1. Put every limitation into a matrix: severity, probability, affected users, effort, prerequisite, and owner.
 2. Mark which limitations block public production, which block scale, and which are optional enhancements.
 3. Choose the first five hardening tasks and justify their order.
-4. Write acceptance criteria for password reset, token cleanup, end-to-end tests, and audit retention.
+4. Review the implemented password reset, token cleanup, and end-to-end tests; then write acceptance criteria for audit retention.
 5. Explain why browser speech overlap must not be marketed as pronunciation certification.
+6. Explain why a successful laptop load run cannot certify a different cloud deployment, and list the release evidence that should be retained.
 
 **Success check.** Roadmap decisions are tied to explicit risks and outcomes rather than feature excitement alone.
 
@@ -1708,14 +1862,20 @@ Never commit real environment files, secrets, backups, or database exports.
 
 ### Phase 1: hardening
 
-- Replace all development secrets.
-- Deploy behind HTTPS.
-- Add CSP and security headers.
-- Add password reset and verification resend.
-- Add scheduled token cleanup.
-- Add structured logs and request correlation.
-- Add end-to-end tests for registration, approval, login, completion, and suspension.
-- Add dependency, secret, and image scanning.
+Completed in this repository:
+
+- Nonce-based CSP and application security headers.
+- Password reset and verification resend with privacy-preserving responses and rate limits.
+- Scheduled token cleanup.
+- Structured logs and request correlation.
+- End-to-end Chromium tests for registration, approval, login, recovery, completion, and suspension.
+
+Remaining deployment work:
+
+- Replace all development secrets when a real environment is provisioned (not changed in this work).
+- Choose a domain/host and deploy behind HTTPS (skipped because no domain/host exists yet).
+- Run and retain the 100-user exam load report on staging; add pool/latency dashboards and an exam-window deployment freeze procedure.
+- Add dependency, secret, and image scanning when desired (not added in this work).
 
 ### Phase 2: managed infrastructure
 
@@ -1724,6 +1884,7 @@ Never commit real environment files, secrets, backups, or database exports.
 - Transactional email provider.
 - Deployment secret manager.
 - Central metrics, logs, and alerts.
+- Multiple stateless Spring/Next instances behind a load balancer, with aggregate connection budgeting and rehearsed graceful deploys during exams.
 
 ### Phase 3: learning depth
 
@@ -1732,6 +1893,7 @@ Never commit real environment files, secrets, backups, or database exports.
 - Add progress history and mastery analytics.
 - Add speech scoring only after privacy and consent design.
 - Improve captions, transcripts, and keyboard navigation.
+- Add exam authoring/versioning, randomized banks, attempt policy, accommodations, and instructor review only after assessment-governance design.
 
 ### Phase 4: open-source readiness
 
@@ -1776,12 +1938,15 @@ Never commit real environment files, secrets, backups, or database exports.
 ENAcademy/
 ├── frontend/
 │   ├── app/                         Routes and styles
+│   │   ├── exams/                   Student exam center/player
+│   │   └── admin/exams/             Exam operations UI
 │   ├── components/
 │   │   ├── AuthProvider.tsx         Session lifecycle
 │   │   ├── PreferencesProvider.tsx  Language and theme state
 │   │   └── LessonPlayer.tsx         Interactive lesson flow
 │   ├── lib/
 │   │   ├── curriculum.ts            Editable curriculum
+│   │   ├── exams.ts                 Typed exam view models/helpers
 │   │   └── i18n.ts                  English and Persian UI
 │   ├── Dockerfile                   Standalone non-root image
 │   └── next.config.ts               API proxy
@@ -1791,6 +1956,7 @@ ENAcademy/
 │   │   ├── admin/                   Approval and audit access
 │   │   ├── learning/                Curriculum and progress
 │   │   ├── commerce/                Products, orders, access, and Persian invoices
+│   │   ├── exam/                    Timed attempts, batch answers, grading, admin controls
 │   │   ├── config/                  Security and startup seeders
 │   │   ├── domain/                  User model
 │   │   └── shared/                  Errors and auditing
@@ -1804,9 +1970,14 @@ ENAcademy/
 ├── docs/
 │   ├── architecture.md
 │   ├── database.md
+│   ├── exam-capacity.md
 │   ├── security.md
 │   └── system-guide.md
-├── scripts/export-curriculum.mjs
+├── scripts/
+│   ├── export-curriculum.mjs
+│   ├── exam-load-fixture.sql         Isolated 100-student staging fixture
+│   ├── exam-load-test.mjs            Concurrent API workload and report
+│   └── exam-load-test.sh             One-command fixture plus workload
 ├── .github/workflows/ci.yml
 ├── docker-compose.yml
 ├── start-app.sh
@@ -1824,11 +1995,11 @@ ENAcademy/
 - Know where new code belongs.
 - Avoid creating duplicate sources of truth.
 
-**Lesson.** Navigate by responsibility, not file-name guessing. Routes live in `frontend/app`; reusable browser behavior lives in `frontend/components`; curriculum and translations live in `frontend/lib`. Spring packages follow domains such as auth, learning, commerce, admin, config, and shared behavior. Resources hold migrations, curriculum JSON, protected books, fonts, and configuration. Root files define delivery and operation.
+**Lesson.** Navigate by responsibility, not file-name guessing. Routes live in `frontend/app`; reusable browser behavior lives in `frontend/components`; curriculum, exam view types, and translations live in `frontend/lib`. Spring packages follow domains such as auth, learning, exam, commerce, admin, config, and shared behavior. Resources hold migrations, curriculum JSON, protected books, fonts, and configuration. Root files define delivery and operation, while `scripts/` owns repeatable generation and load-testing tools.
 
 **Guided practice**
 
-1. Locate the full path for login, lesson completion, purchase checkout, invoice rendering, theme switching, and student approval.
+1. Locate the full path for login, lesson completion, exam autosave/submit, purchase checkout, invoice rendering, theme switching, and student approval.
 2. For each behavior, identify its page/component, controller, service, repository, migration/table, and test.
 3. Find where the API proxy, Docker topology, CI workflow, start script, and environment examples live.
 4. Decide where you would add password reset, a new product type, an additional lesson activity, and an operations runbook.
@@ -1847,6 +2018,7 @@ ENAcademy/
 - [README](../README.md)
 - [Architecture summary](architecture.md)
 - [Database operations](database.md)
+- [Online exams and 100-user capacity](exam-capacity.md)
 - [Security checklist](security.md)
 - [Contribution guide](../CONTRIBUTING.md)
 
