@@ -194,3 +194,47 @@ TTL verification-resend:<sha256>
 - Local named volumes are not a production backup strategy.
 - Production should use managed PostgreSQL with encrypted storage, automated backups, point-in-time recovery, restricted network access, and monitored capacity.
 - Production Redis should require authentication and private networking; its data may be discarded because it is not the system of record.
+
+---
+
+## Additive implementation record — database work completed
+
+This appendix records the database additions made during the current platform phase. No existing migration was rewritten or removed.
+
+### Migration history added
+
+| Migration | Purpose | Important result |
+|---|---|---|
+| `V2__beta_commerce.sql` | Products, orders, immutable item snapshots, invoices, and entitlements | Every successful simulated checkout creates one durable invoice and unlocks the purchased course or book. |
+| `V3__online_exams.sql` | Exams, questions, attempts, and answers plus seeded A1/A2 exams | Exam timing, answers, status, score, and result are authoritative in PostgreSQL. |
+| `V4__account_recovery_and_token_maintenance.sql` | Password-reset tokens and cleanup indexes | Password recovery uses one-time hashed tokens and scheduled retention can find expired/old rows efficiently. |
+
+### New exam data flow
+
+1. An administrator changes publication and schedule data in `exams`.
+2. An eligible student starts an exam; one `exam_attempts` row is inserted for the user/exam pair.
+3. `deadline_at` is calculated by the server and stored durably, so refreshing or changing the browser clock cannot extend the attempt.
+4. Changed choices are validated and written to `exam_answers` in one JSONB-backed batch upsert.
+5. Submission locks the attempt row, aggregates the grade, writes the final score/status/timestamp, and safely returns the existing result if a retry arrives.
+6. Correct answers and bilingual explanations are disclosed only after finalization.
+
+### New recovery-token data flow
+
+1. A recovery request creates a cryptographically random raw token for email delivery.
+2. Only its SHA-256 hash, user relationship, expiry, and lifecycle timestamps are stored.
+3. Reset consumes the row under a database lock, replaces the BCrypt password hash, and revokes all refresh sessions for the account.
+4. The raw reset token cannot be reconstructed from PostgreSQL and cannot be reused after successful consumption.
+5. The scheduled cleanup removes expired rows and later removes old used/revoked rows according to retention configuration.
+
+### Concurrency and integrity additions
+
+- Unique user/exam constraints prevent duplicate attempts under simultaneous start requests.
+- Unique attempt/question constraints prevent duplicate saved answers.
+- Foreign keys ensure answers belong to durable attempts/questions; services additionally verify that the question and option belong to the active exam.
+- Attempt row locks serialize save/finalize races, and idempotent finalization makes network retries safe.
+- Indexes support published-exam discovery, attempt lookup, answer aggregation, admin reporting, and token cleanup.
+- Whole-number toman and immutable order-item snapshots keep past invoice totals stable after later catalog edits.
+
+### Storage outcome
+
+PostgreSQL remains the only source of truth. Redis stores only expiring rate counters, generated invoice PDF bytes are not stored, browser exam state is only a temporary working copy, and local Docker volumes remain development storage rather than a production backup system.

@@ -140,3 +140,45 @@ If the target misses a gate, first identify whether CPU-heavy BCrypt login, the 
 - It does not add proctoring, essay grading, question authoring, random question banks, or multiple attempts.
 
 For a public high-stakes exam, add production observability, backups/PITR, multiple application instances behind a load balancer, managed PostgreSQL, deployment rehearsals, incident procedures, and a policy for reconnects and appeals.
+
+---
+
+## Additive implementation record — how the exam workload was optimized
+
+This section records the concrete work completed for the 100-simultaneous-student target. It adds historical context without changing the capacity qualifications above.
+
+### Application workflow improvements
+
+- Attempt start uses one authoritative server transaction and a uniqueness rule instead of trusting browser state.
+- The deadline is durable and server-checked on every write/finalization path.
+- The browser debounces changed answers and sends a bounded batch instead of one request per keystroke or repeatedly sending every answer.
+- Spring validates the complete answer batch and PostgreSQL applies it with one `jsonb_to_recordset` upsert.
+- Submit uses an attempt row lock plus one aggregate grading query, preventing save/submit races and repeated grading work.
+- Submission is idempotent, so a timeout followed by a retry returns the same final result rather than creating another attempt.
+- Correct answers remain outside active-attempt responses, reducing both information leakage and response size.
+
+### Resource and database improvements
+
+- Hikari is bounded at 30 connections by default, with warm idle connections and a finite acquisition timeout.
+- Tomcat request threads, queued requests, and accepted connections are bounded separately from the database pool.
+- Response compression and graceful shutdown are enabled.
+- Indexes cover published/scheduled exam discovery, per-user attempt lookup, answer aggregation, cleanup, and admin reporting.
+- Login rate-limit keys include normalized email and client identity so the isolated load users do not accidentally share one account counter.
+- The load fixture operates only on its dedicated `@enacademy.loadtest` records and is clearly marked unsafe for production data.
+
+### Proof added to the repository
+
+`scripts/exam-load-test.sh`, `scripts/exam-load-fixture.sql`, and `scripts/exam-load-test.mjs` create a repeatable login → list → start/resume → save → submit workload. The report records completion, failures, error rate, and latency distribution and exits unsuccessfully when a learner workflow fails. Separate Playwright coverage proves the browser journey and security/account lifecycle.
+
+### What was verified in this development phase
+
+- Backend compilation and tests completed successfully.
+- Frontend lint, type checking, production build, and all 22 source tests completed successfully.
+- Docker Compose configuration and production image builds completed successfully.
+- The full Compose application became healthy.
+- Local Playwright completed the real lifecycle in Chrome.
+- GitHub Actions independently repeated backend, frontend, container, and Playwright checks successfully.
+
+### What must still be verified later
+
+The full 100-user load command must be rerun on the actual deployment-sized host while CPU, memory, PostgreSQL I/O, connection-pool waits, error rate, and latency are monitored. Passing on one development machine cannot guarantee identical behavior on a smaller host, across a distant network, or during unrelated production traffic.

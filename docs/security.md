@@ -47,3 +47,54 @@ HTTPS deployment was deliberately skipped because this project does not yet have
 Dependency, secret, and container-image scanning are not configured by this change, as requested.
 
 Never commit `.env`, production exports, email lists, raw tokens, database backups, or service credentials.
+
+---
+
+## Additive implementation record — the eight hardening titles
+
+This section uses the exact eight requested hardening titles and records the decision, implementation, linkage, and verification for each one. Earlier security guidance remains unchanged.
+
+### 1. Replace all development secrets — skipped by request
+
+No development secret was replaced during this phase. `.env.example` and Docker defaults remain examples for local use, not production credentials. Before public deployment, generate unique database, administrator, JWT, Redis, and SMTP secrets and inject them through the selected host's protected secret mechanism.
+
+### 2. Deploy behind HTTPS — postponed until hosting exists
+
+No TLS proxy was added because there is no selected domain or deployment host. Adding a local certificate/proxy without the final trust and forwarding topology would not prove production HTTPS. After selecting a host, terminate trusted TLS, redirect HTTP, configure trusted forwarding, restrict allowed origins, enable secure cookies, and verify HSTS on the real domain.
+
+### 3. Add CSP and security headers — implemented
+
+- `frontend/proxy.ts` creates a nonce for each request and builds the Content Security Policy.
+- `frontend/app/layout.tsx` applies the nonce to the early preference script.
+- Next.js sends CSP, clickjacking, MIME-sniffing, referrer, permissions, opener, and resource-policy protections.
+- `SecurityConfig` sends corresponding API headers and enables HSTS when a request is actually secure.
+- The Playwright lifecycle asserts the browser-facing security-header contract.
+
+### 4. Add password reset and verification resend — implemented
+
+- Public endpoints accept an email but return the same neutral response whether the account exists or not.
+- Independent Redis limits reduce resend/reset abuse without sharing the normal login counter.
+- Verification resend replaces an unused verification token.
+- Password reset uses a short-lived, one-time, hashed token delivered through SMTP/Mailpit.
+- Successful reset updates the BCrypt password and revokes every refresh session for that user.
+- Reusing a consumed reset token is rejected and covered by backend integration testing.
+
+### 5. Add scheduled token cleanup — implemented
+
+`TokenCleanupService` runs from the configured cron expression. It removes expired verification, password-reset, and refresh-token rows, then applies the configured retention period to already used/revoked rows. The job reports only aggregate counts in structured logs and never logs raw token material.
+
+### 6. Add structured logs and request correlation — implemented
+
+`CorrelationIdFilter` validates a safe caller-supplied identifier or creates a UUID, places it in logging context, returns it as `X-Request-ID`, and records method, path without query parameters, status, and duration. `ApiExceptionHandler` includes the same identifier in safe ProblemDetail responses. Passwords, request bodies, cookies, bearer tokens, and recovery URLs are intentionally excluded.
+
+### 7. Add end-to-end workflow tests — implemented
+
+The GitHub Actions platform test builds and starts the real Compose services, then Playwright verifies registration, verification resend, email verification, administrator approval, login, password reset, rejection of the old password, login with the new password, purchase, invoice creation, lesson completion, suspension, and denial of later protected access. Backend and frontend suites run independently before the integrated browser gate.
+
+### 8. Add dependency, secret, and image scanning — skipped by request
+
+No dependency scanner, repository secret scanner, or container-image vulnerability scanner was added. Normal build/test gates remain active, but they are not substitutes for scanning. This item should be reconsidered before public open-source releases or production deployment.
+
+### Verification outcome
+
+Items 3–7 passed local compilation/tests and GitHub Actions. Items 1 and 8 are explicitly incomplete by decision. Item 2 is explicitly postponed until a real domain and host provide the information needed for a correct HTTPS design. This status language prevents the documentation from presenting an excluded or postponed control as implemented.

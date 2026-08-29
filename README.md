@@ -205,3 +205,38 @@ GitHub Actions independently runs Spring integration tests, frontend regression 
 ## Project status
 
 ENAcademy is an actively developed portfolio and future open-source project. Its commerce workflow is intentionally simulated. The online-exam code and repeatable 100-user harness provide a measurable capacity target, not a hardware-independent guarantee. HTTPS deployment is intentionally not configured because no domain/host has been selected; production payments, tax compliance, refunds, proctoring, high availability, object storage, central monitoring, backups, and deployment-specific hardening remain future work.
+
+---
+
+## Implementation record — what we added
+
+This additive record preserves the project introduction above and summarizes the major platform work completed during the current development phase.
+
+### Product capabilities delivered
+
+- Rebuilt ENAcademy as a real Spring Boot, Next.js, PostgreSQL, Redis, and Docker Compose web application.
+- Added student registration, email verification, administrator approval, login, rotating sessions, suspension, and account recovery.
+- Added a persistent learning journey with ordered lessons, progress, XP, saved vocabulary, browser listening, and speaking practice.
+- Added English/Persian interface switching, RTL support, improved bilingual fonts, light/dark modes, and selectable color palettes.
+- Added a simulated toman store for courses and downloadable books, automatic entitlements, purchase history, and a Persian PDF invoice for every checkout.
+- Added database-backed timed online exams with autosave, server-side grading, results, admin scheduling, and a repeatable 100-student load-test harness.
+- Added Docker start/stop scripts, health checks, database migrations, structured logs, API documentation, tests, and GitHub Actions quality gates.
+
+### The eight hardening items
+
+| # | Requested item | Status | Result |
+|---:|---|---|---|
+| 1 | Replace all development secrets | Skipped by request | Example/local defaults remain development-only and must be replaced before public production. |
+| 2 | Deploy behind HTTPS | Postponed | A real host and domain must be selected before configuring trusted TLS termination and secure cookies. |
+| 3 | Add CSP and security headers | Implemented | Next.js uses a per-request CSP nonce; Next.js and Spring send browser/API security headers. |
+| 4 | Add password reset and verification resend | Implemented | Neutral request responses, one-time hashed tokens, email links, throttling, and refresh-session revocation are in place. |
+| 5 | Add scheduled token cleanup | Implemented | A configurable daily job removes expired tokens and old consumed/revoked token rows. |
+| 6 | Add structured logs and request correlation | Implemented | Requests receive `X-Request-ID`; safe structured logs and ProblemDetail responses share that identifier. |
+| 7 | Add end-to-end workflow tests | Implemented | Playwright covers registration, verification resend, approval, login, reset, purchase, invoice, lesson completion, and suspension. |
+| 8 | Add dependency, secret, and image scanning | Skipped by request | These scanners are not configured and remain a future production/open-source task. |
+
+### Verification and delivery
+
+The completed work passed Maven backend checks, frontend lint/type-check/build, 22 frontend source tests, Docker Compose validation, production image builds, local Chrome end-to-end testing, and the same full-stack Playwright lifecycle in GitHub Actions. The application and documentation were separated into genuine reviewable pull requests so `main` was never overwritten directly.
+
+For the detailed explanation, continue with the [complete system and teaching guide](docs/system-guide.md), [architecture record](docs/architecture.md), [database record](docs/database.md), [security record](docs/security.md), and [exam-capacity record](docs/exam-capacity.md).
