@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { Manrope, Vazirmatn } from 'next/font/google';
+import { headers } from 'next/headers';
 import './globals.css';
 import './product.css';
 import { AuthProvider } from '@/components/AuthProvider';
@@ -28,14 +29,15 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const nonce=(await headers()).get('x-nonce')??undefined;
   return (
     <html lang="en" dir="ltr" data-theme="light" data-accent="emerald" className={`${manrope.variable} ${vazirmatn.variable}`} suppressHydrationWarning>
-      <head><script dangerouslySetInnerHTML={{__html:`try{const p=JSON.parse(localStorage.getItem('enacademy.preferences')||'{}');const r=document.documentElement;if(p.locale==='fa'){r.lang='fa';r.dir='rtl'}if(p.mode==='dark')r.dataset.theme='dark';if(['emerald','ocean','violet','sunset','rose'].includes(p.accent))r.dataset.accent=p.accent}catch{}`}} /></head>
+      <head><script nonce={nonce} dangerouslySetInnerHTML={{__html:`try{const p=JSON.parse(localStorage.getItem('enacademy.preferences')||'{}');const r=document.documentElement;if(p.locale==='fa'){r.lang='fa';r.dir='rtl'}if(p.mode==='dark')r.dataset.theme='dark';if(['emerald','ocean','violet','sunset','rose'].includes(p.accent))r.dataset.accent=p.accent}catch{}`}} /></head>
       <body>
         <PreferencesProvider><AuthProvider>{children}</AuthProvider><PreferenceControls /></PreferencesProvider>
       </body>

@@ -13,6 +13,9 @@ type AuthContextValue = {
   user: SessionUser | null; loading: boolean;
   login(email:string,password:string): Promise<void>;
   register(fullName:string,email:string,password:string): Promise<string>;
+  requestPasswordReset(email:string): Promise<string>;
+  resetPassword(token:string,password:string): Promise<string>;
+  resendVerification(email:string): Promise<string>;
   logout(): Promise<void>;
   apiFetch<T>(path:string,init?:RequestInit): Promise<T>;
   apiDownload(path:string): Promise<Blob>;
@@ -67,8 +70,20 @@ export function AuthProvider({children}:{children:React.ReactNode}) {
     if(!response.ok) throw await parseProblem(response);
     return ((await response.json()) as {message:string}).message;
   },[]);
+  const requestPasswordReset=useCallback(async(email:string)=>{
+    const response=await fetch('/api/v1/auth/password/forgot',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email})});
+    if(!response.ok)throw await parseProblem(response);return ((await response.json()) as {message:string}).message;
+  },[]);
+  const resetPassword=useCallback(async(token:string,password:string)=>{
+    const response=await fetch('/api/v1/auth/password/reset',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({token,password})});
+    if(!response.ok)throw await parseProblem(response);return ((await response.json()) as {message:string}).message;
+  },[]);
+  const resendVerification=useCallback(async(email:string)=>{
+    const response=await fetch('/api/v1/auth/verification/resend',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email})});
+    if(!response.ok)throw await parseProblem(response);return ((await response.json()) as {message:string}).message;
+  },[]);
   const logout=useCallback(async()=>{await fetch('/api/v1/auth/logout',{method:'POST',credentials:'include'});accessToken=null;setUser(null);},[]);
-  const value=useMemo(()=>({user,loading,login,register,logout,apiFetch,apiDownload}),[user,loading,login,register,logout,apiFetch,apiDownload]);
+  const value=useMemo(()=>({user,loading,login,register,requestPasswordReset,resetPassword,resendVerification,logout,apiFetch,apiDownload}),[user,loading,login,register,requestPasswordReset,resetPassword,resendVerification,logout,apiFetch,apiDownload]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { PublicHeader } from '@/components/PublicHeader';
 import { type ApiError, useAuth } from '@/components/AuthProvider';
 import { usePreferences } from '@/components/PreferencesProvider';
@@ -104,6 +105,7 @@ export default function LoginPage() {
             <input name="email" type="email" maxLength={320} autoComplete="email" placeholder="you@example.com" required aria-invalid={Boolean(fieldErrors.email)} aria-describedby={fieldErrors.email ? 'email-error' : undefined}/>
             {fieldErrors.email && <span className="field-error" id="email-error">{fieldErrors.email}</span>}
           </label>
+          {mode === 'login' && <div className="auth-help-links"><Link href="/forgot-password">{t('recovery.forgot')}</Link><Link href="/resend-verification">{t('recovery.resend')}</Link></div>}
           <label>
             {t('auth.password')}
             <input name="password" type="password" minLength={mode === 'register' ? 10 : undefined} maxLength={72} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} placeholder={t('auth.passwordPlaceholder')} required aria-invalid={Boolean(fieldErrors.password)} aria-describedby={fieldErrors.password ? 'password-error' : mode === 'register' ? 'password-help' : undefined}/>

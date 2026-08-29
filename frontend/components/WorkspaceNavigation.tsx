@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/components/AuthProvider';
 import { usePreferences } from '@/components/PreferencesProvider';
 
-export function StudentSidebar({active}:{active:'dashboard'|'store'|'purchases'}) {
+export function StudentSidebar({active}:{active:'dashboard'|'exams'|'store'|'purchases'}) {
   const {user,logout}=useAuth();
   const {t}=usePreferences();
   const router=useRouter();
@@ -15,6 +15,7 @@ export function StudentSidebar({active}:{active:'dashboard'|'store'|'purchases'}
     <Link className="wordmark" href="/"><span className="wordmark-glyph">EN</span><span>ENAcademy</span></Link>
     <nav>
       <Link className={active==='dashboard'?'active':''} href="/dashboard"><span>⌂</span>{t('dashboard.overview')}</Link>
+      <Link className={active==='exams'?'active':''} href="/exams"><span>✓</span>{t('exam.exams')}</Link>
       <Link className={active==='store'?'active':''} href="/store"><span>◫</span>{t('commerce.store')}</Link>
       <Link className={active==='purchases'?'active':''} href="/purchases"><span>▤</span>{t('commerce.purchases')}</Link>
       <Link href="/curriculum"><span>↗</span>{t('dashboard.path')}</Link>

@@ -41,15 +41,18 @@ public class AuthService {
     private final String issuer;
     private final long accessMinutes;
     private final long refreshDays;
+    private final long passwordResetMinutes;
 
     public AuthService(UserRepository users, TokenRepository tokens, PasswordEncoder passwords,
                        JwtEncoder jwtEncoder, VerificationMailer mailer, RateLimitService rateLimit,
                        AuditService audit, @Value("${app.jwt.issuer}") String issuer,
                        @Value("${app.jwt.access-minutes}") long accessMinutes,
-                       @Value("${app.jwt.refresh-days}") long refreshDays) {
+                       @Value("${app.jwt.refresh-days}") long refreshDays,
+                       @Value("${app.auth.password-reset-minutes:60}") long passwordResetMinutes) {
         this.users=users; this.tokens=tokens; this.passwords=passwords; this.jwtEncoder=jwtEncoder;
         this.mailer=mailer; this.rateLimit=rateLimit; this.audit=audit; this.issuer=issuer;
         this.accessMinutes=accessMinutes; this.refreshDays=refreshDays;
+        this.passwordResetMinutes=passwordResetMinutes;
     }
 
     @Transactional
@@ -71,6 +74,40 @@ public class AuthService {
             new ApiException(HttpStatus.BAD_REQUEST, "INVALID_VERIFICATION_TOKEN", "This verification link is invalid or has expired."));
         users.markEmailVerified(token.userId());
         audit.record(token.userId(), "EMAIL_VERIFIED", "USER", token.userId().toString(), Map.of());
+    }
+
+    @Transactional
+    public void resendVerification(String rawEmail,String ip) {
+        String email=normalizeEmail(rawEmail);
+        rateLimit.checkVerificationResend(email,ip);
+        users.findByEmail(email).filter(user->!user.emailVerified()).ifPresent(user->{
+            String rawToken=randomToken();
+            tokens.createVerification(user.id(),hash(rawToken),Instant.now().plus(Duration.ofHours(24)));
+            mailer.send(user.fullName(),user.email(),rawToken);
+            audit.record(user.id(),"VERIFICATION_RESENT","USER",user.id().toString(),Map.of());
+        });
+    }
+
+    @Transactional
+    public void requestPasswordReset(String rawEmail,String ip) {
+        String email=normalizeEmail(rawEmail);
+        rateLimit.checkPasswordReset(email,ip);
+        users.findByEmail(email).ifPresent(user->{
+            String rawToken=randomToken();
+            tokens.createPasswordReset(user.id(),hash(rawToken),
+                Instant.now().plus(Duration.ofMinutes(passwordResetMinutes)));
+            mailer.sendPasswordReset(user.fullName(),user.email(),rawToken);
+            audit.record(user.id(),"PASSWORD_RESET_REQUESTED","USER",user.id().toString(),Map.of());
+        });
+    }
+
+    @Transactional
+    public void resetPassword(String rawToken,String password) {
+        var token=tokens.consumePasswordReset(hash(rawToken)).orElseThrow(()->
+            new ApiException(HttpStatus.BAD_REQUEST,"INVALID_PASSWORD_RESET_TOKEN","This password reset link is invalid or has expired."));
+        users.updatePassword(token.userId(),passwords.encode(password));
+        tokens.revokeAllRefreshForUser(token.userId());
+        audit.record(token.userId(),"PASSWORD_RESET_COMPLETED","USER",token.userId().toString(),Map.of());
     }
 
     @Transactional

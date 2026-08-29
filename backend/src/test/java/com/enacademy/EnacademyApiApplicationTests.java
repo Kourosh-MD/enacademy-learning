@@ -1,13 +1,24 @@
 package com.enacademy;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.enacademy.auth.AuthService;
+import com.enacademy.auth.TokenRepository;
 import com.enacademy.auth.UserRepository;
 import com.enacademy.commerce.CommerceRepository;
+import com.enacademy.domain.Role;
+import com.enacademy.domain.UserStatus;
+import com.enacademy.exam.ExamRepository;
 import com.enacademy.learning.LearningRepository;
+import com.enacademy.shared.ApiException;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.junit.jupiter.Container;
@@ -31,15 +42,45 @@ class EnacademyApiApplicationTests {
     @Autowired LearningRepository learning;
     @Autowired UserRepository users;
     @Autowired CommerceRepository commerce;
+    @Autowired ExamRepository exams;
+    @Autowired AuthService auth;
+    @Autowired TokenRepository tokens;
+    @Autowired PasswordEncoder passwordEncoder;
 
     @Test
     void migrationsSeedTheFullCurriculumAndBootstrapTheAdmin() {
         assertThat(learning.modules()).hasSize(8);
         assertThat(commerce.allProducts()).hasSize(4);
+        assertThat(exams.adminExams()).hasSize(2).allSatisfy(exam -> {
+            assertThat(exam.published()).isTrue();
+            assertThat(exam.questionCount()).isEqualTo(6);
+        });
         assertThat(learning.modules().stream().flatMap(module -> learning.lessonsForModule(module.id()).stream())).hasSize(16);
         assertThat(users.findByEmail("admin@enacademy.local")).get().satisfies(admin -> {
             assertThat(admin.approved()).isTrue();
             assertThat(admin.emailVerified()).isTrue();
         });
+    }
+
+    @Test
+    void passwordResetIsOneTimeAndRevokesEveryRefreshSession() {
+        String email="reset-"+UUID.randomUUID()+"@example.test";
+        var user=users.insert("Reset Test",email,passwordEncoder.encode("OldStrongPass2026"),
+            Role.STUDENT,UserStatus.APPROVED);
+        users.markEmailVerified(user.id());
+
+        String refreshToken="refresh-"+UUID.randomUUID();
+        String resetToken="reset-"+UUID.randomUUID();
+        tokens.createRefresh(user.id(),AuthService.hash(refreshToken),Instant.now().plus(Duration.ofDays(7)));
+        tokens.createPasswordReset(user.id(),AuthService.hash(resetToken),Instant.now().plus(Duration.ofHours(1)));
+
+        auth.resetPassword(resetToken,"NewStrongPass2026");
+
+        assertThat(passwordEncoder.matches("NewStrongPass2026",users.findByEmail(email).orElseThrow().passwordHash()))
+            .isTrue();
+        assertThat(tokens.consumeRefresh(AuthService.hash(refreshToken))).isEmpty();
+        assertThatThrownBy(()->auth.resetPassword(resetToken,"AnotherPass2026"))
+            .isInstanceOfSatisfying(ApiException.class,
+                problem->assertThat(problem.code()).isEqualTo("INVALID_PASSWORD_RESET_TOKEN"));
     }
 }
