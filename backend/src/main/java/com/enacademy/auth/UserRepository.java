@@ -60,6 +60,11 @@ public class UserRepository {
             .param("id", id).param("status", status.name()).update();
     }
 
+    public void updatePassword(UUID id,String passwordHash) {
+        jdbc.sql("UPDATE users SET password_hash=:hash,updated_at=now() WHERE id=:id")
+            .param("hash",passwordHash).param("id",id).update();
+    }
+
     private UserAccount map(java.sql.ResultSet rs, int row) throws java.sql.SQLException {
         Timestamp verified = rs.getTimestamp("email_verified_at");
         return new UserAccount(

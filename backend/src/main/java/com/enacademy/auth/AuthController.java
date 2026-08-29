@@ -1,9 +1,11 @@
 package com.enacademy.auth;
 
 import com.enacademy.auth.AuthModels.AuthResponse;
+import com.enacademy.auth.AuthModels.EmailRequest;
 import com.enacademy.auth.AuthModels.LoginRequest;
 import com.enacademy.auth.AuthModels.MessageResponse;
 import com.enacademy.auth.AuthModels.RegisterRequest;
+import com.enacademy.auth.AuthModels.ResetPasswordRequest;
 import com.enacademy.auth.AuthModels.UserView;
 import com.enacademy.auth.AuthModels.VerifyRequest;
 import com.enacademy.shared.ApiException;
@@ -47,6 +49,24 @@ public class AuthController {
         return new MessageResponse("Email verified. Your account is now waiting for administrator approval.");
     }
 
+    @PostMapping("/verification/resend")
+    MessageResponse resendVerification(@Valid @RequestBody EmailRequest request,HttpServletRequest servletRequest) {
+        auth.resendVerification(request.email(),clientIp(servletRequest));
+        return new MessageResponse("If this account still needs verification, a new email has been sent.");
+    }
+
+    @PostMapping("/password/forgot")
+    MessageResponse forgotPassword(@Valid @RequestBody EmailRequest request,HttpServletRequest servletRequest) {
+        auth.requestPasswordReset(request.email(),clientIp(servletRequest));
+        return new MessageResponse("If an account exists for this email, a password reset message has been sent.");
+    }
+
+    @PostMapping("/password/reset")
+    MessageResponse resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
+        auth.resetPassword(request.token(),request.password());
+        return new MessageResponse("Password changed. Sign in with your new password.");
+    }
+
     @PostMapping("/login")
     ResponseEntity<AuthResponse> login(@Valid @RequestBody LoginRequest request, HttpServletRequest servletRequest) {
         var session = auth.login(request.email(), request.password(), clientIp(servletRequest));
@@ -83,7 +103,6 @@ public class AuthController {
     }
 
     private String clientIp(HttpServletRequest request) {
-        String forwarded = request.getHeader("X-Forwarded-For");
-        return forwarded == null ? request.getRemoteAddr() : forwarded.split(",")[0].trim();
+        return request.getRemoteAddr();
     }
 }

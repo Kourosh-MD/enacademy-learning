@@ -5,6 +5,11 @@ spring:
     url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/enacademy}
     username: ${DATABASE_USER:enacademy}
     password: ${DATABASE_PASSWORD:enacademy}
+    hikari:
+      maximum-pool-size: ${DB_POOL_MAX:30}
+      minimum-idle: ${DB_POOL_MIN_IDLE:5}
+      connection-timeout: ${DB_POOL_CONNECTION_TIMEOUT_MS:5000}
+      validation-timeout: ${DB_POOL_VALIDATION_TIMEOUT_MS:2000}
   jpa:
     open-in-view: false
     hibernate:
@@ -28,7 +33,17 @@ spring:
 
 server:
   port: ${PORT:8080}
+  shutdown: graceful
   forward-headers-strategy: framework
+  tomcat:
+    threads:
+      max: ${SERVER_MAX_THREADS:200}
+      min-spare: ${SERVER_MIN_SPARE_THREADS:20}
+    accept-count: ${SERVER_ACCEPT_COUNT:200}
+    max-connections: ${SERVER_MAX_CONNECTIONS:1000}
+  compression:
+    enabled: true
+    min-response-size: 1KB
   error:
     include-message: never
 
@@ -38,6 +53,11 @@ management:
 
 springdoc:
   swagger-ui.path: /docs
+
+logging:
+  structured:
+    format:
+      console: ${LOG_STRUCTURED_FORMAT:logstash}
 
 app:
   public-url: ${APP_PUBLIC_URL:http://localhost:3000}
@@ -52,3 +72,7 @@ app:
     password: ${APP_ADMIN_PASSWORD:ChangeMe123!}
   security:
     allowed-origins: ${ALLOWED_ORIGINS:http://localhost:3000}
+  auth:
+    password-reset-minutes: ${PASSWORD_RESET_MINUTES:60}
+    token-retention-days: ${TOKEN_RETENTION_DAYS:7}
+    token-cleanup-cron: "${TOKEN_CLEANUP_CRON:0 20 3 * * *}"

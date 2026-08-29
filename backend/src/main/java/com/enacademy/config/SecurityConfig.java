@@ -24,6 +24,8 @@ import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
+import org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter.ReferrerPolicy;
+import org.springframework.security.web.header.writers.StaticHeadersWriter;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
@@ -67,10 +69,18 @@ public class SecurityConfig {
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(requests -> requests
                 .requestMatchers("/api/v1/auth/register", "/api/v1/auth/verify", "/api/v1/auth/login",
-                    "/api/v1/auth/refresh", "/api/v1/auth/logout", "/error", "/actuator/health/**", "/docs/**", "/v3/api-docs/**").permitAll()
+                    "/api/v1/auth/refresh", "/api/v1/auth/logout", "/api/v1/auth/verification/resend",
+                    "/api/v1/auth/password/forgot", "/api/v1/auth/password/reset", "/error",
+                    "/actuator/health/**", "/docs/**", "/v3/api-docs/**").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/v1/learning/curriculum").permitAll()
                 .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
                 .anyRequest().authenticated())
+            .headers(headers->headers
+                .contentTypeOptions(contentType->{}).frameOptions(frame->frame.deny())
+                .referrerPolicy(referrer->referrer.policy(ReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN))
+                .addHeaderWriter(new StaticHeadersWriter("Permissions-Policy",
+                    "camera=(), geolocation=(), payment=(), usb=(), microphone=(self)"))
+                .httpStrictTransportSecurity(hsts->hsts.includeSubDomains(true).maxAgeInSeconds(31536000)))
             .oauth2ResourceServer(resource -> resource.jwt(jwt -> jwt.jwtAuthenticationConverter(converter))).build();
     }
 

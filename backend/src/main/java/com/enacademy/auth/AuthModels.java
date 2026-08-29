@@ -20,6 +20,12 @@ public final class AuthModels {
     ) {}
     public record LoginRequest(@NotBlank @Email String email, @NotBlank String password) {}
     public record VerifyRequest(@NotBlank String token) {}
+    public record EmailRequest(@NotBlank @Email @Size(max=320) String email) {}
+    public record ResetPasswordRequest(
+        @NotBlank String token,
+        @NotBlank @Size(min=10,max=72)
+        @Pattern(regexp="^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d).+$", message="must include uppercase, lowercase, and a number") String password
+    ) {}
     public record MessageResponse(String message) {}
     public record UserView(UUID id, String fullName, String email, Role role, UserStatus status,
                            boolean emailVerified, Instant createdAt) {
