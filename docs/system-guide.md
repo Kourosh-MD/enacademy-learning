@@ -2016,6 +2016,7 @@ ENAcademy/
 ## Related documents
 
 - [README](../README.md)
+- [Platform tools teaching guide](platform-tools-guide.md)
 - [Architecture summary](architecture.md)
 - [Database operations](database.md)
 - [Online exams and 100-user capacity](exam-capacity.md)
