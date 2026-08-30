@@ -731,3 +731,554 @@ You understand this guide when you can explain:
 - [Security](security.md)
 - [Online exams and 100-user capacity](exam-capacity.md)
 - [Contribution guide](../CONTRIBUTING.md)
+
+---
+
+## 17. ENAcademy API handbook — what exists and how to use it
+
+This chapter turns the earlier Swagger and REST concepts into a working map of ENAcademy's complete API surface.
+
+### 17.1 What “API” means here
+
+An API is a defined boundary through which one component requests behavior or data from another. ENAcademy uses several kinds:
+
+| API/boundary | Caller → provider | Purpose |
+|---|---|---|
+| ENAcademy REST API | Next.js/browser → Spring Boot | Accounts, learning, exams, commerce, administration, files |
+| OpenAPI endpoint | Developer tool/browser → Springdoc | Machine-readable REST contract |
+| Swagger UI | Developer browser → generated OpenAPI | Human exploration and local public-operation execution |
+| Actuator API | Docker/operator → Spring Boot | Health, readiness, liveness, info, metrics output |
+| Web Speech API | Lesson component → browser | Speech synthesis and optional recognition |
+| SMTP | Spring Mail → Mailpit/provider | Verification and password-reset message delivery |
+| JDBC/PostgreSQL protocol | Spring repositories → PostgreSQL | Durable queries and transactions |
+| Redis protocol | Rate-limit service → Redis | Expiring abuse counters |
+
+Not every integration is an HTTP API, and not every API is external. ENAcademy currently uses no payment/banking, social-login, cloud speech-scoring, OpenAI, or external invoice-rendering API.
+
+### 17.2 Base addresses and versioning
+
+The browser calls relative paths:
+
+```text
+/api/v1/...
+```
+
+Next.js rewrites them to Spring. When calling Spring directly in local exercises, use:
+
+```text
+http://localhost:8080/api/v1/...
+```
+
+`v1` is the contract namespace. It gives the project a place to introduce a deliberately incompatible future contract without silently changing every existing client. It does not mean every internal implementation change requires `v2`.
+
+### 17.3 Endpoint groups and access levels
+
+| Group | Base path | Access model | Main caller |
+|---|---|---|---|
+| Authentication | `/api/v1/auth` | Mix of public recovery/session commands and authenticated `/me` | Login, verify, recovery pages, `AuthProvider` |
+| Learning | `/api/v1/learning` | Curriculum public; dashboard/lessons/words/completion authenticated and approved | Dashboard and lesson player |
+| Exams | `/api/v1/exams` | Authenticated, approved, entitled student; attempt ownership enforced | Exam center/player |
+| Store | `/api/v1/store` | Authenticated; purchase/invoice/book ownership or entitlement enforced | Store and purchases |
+| Student administration | `/api/v1/admin` | ADMIN role | Admin dashboard |
+| Exam administration | `/api/v1/admin/exams` | ADMIN role | Exam operations |
+| Commerce administration | `/api/v1/admin/commerce` | ADMIN role | Product/order/invoice operations |
+
+### 17.4 Authentication API
+
+| Method | Path | Purpose | Important lifecycle effect |
+|---|---|---|---|
+| `POST` | `/auth/register` | Create pending student | Hash password, create 24-hour verification token, send email |
+| `POST` | `/auth/verify` | Prove mailbox control | Consume verification token, mark email verified |
+| `POST` | `/auth/verification/resend` | Request a replacement link | Rate limit; consume/replace prior unused verification token |
+| `POST` | `/auth/password/forgot` | Request reset email | Neutral response; rate limit; create reset token |
+| `POST` | `/auth/password/reset` | Change password | Consume reset token and revoke every refresh session |
+| `POST` | `/auth/login` | Authenticate | Return access JWT and set refresh cookie |
+| `POST` | `/auth/refresh` | Rotate session | Consume old refresh token; issue new access and refresh tokens |
+| `POST` | `/auth/logout` | End current refresh session | Revoke stored refresh hash and expire cookie |
+| `GET` | `/auth/me` | Read current user | Requires bearer access JWT |
+
+The actual prefix `/api/v1` is omitted from the shorter tables in this chapter.
+
+### 17.5 Learning, exam, and commerce APIs
+
+| Domain | Read operations | State-changing operations | Server rules that still apply |
+|---|---|---|---|
+| Learning | Curriculum, dashboard, lesson, saved words | Complete lesson, save/remove word | Approval, course entitlement, lesson sequence, bounded score, idempotent progress |
+| Exams | List exams, read owned attempt | Start/resume, batch-save answers, submit | Publication/window, entitlement, one attempt, ownership, deadline, final status |
+| Commerce | Products, purchases, invoice PDF, book PDF | Simulated checkout | Active product, no duplicate entitlement, price from DB, invoice ownership, book entitlement |
+| Administration | Students, audits, exams, products, orders | Change status, schedule exam, change product | ADMIN role plus service validation and audit |
+
+### 17.6 Four frontend request patterns
+
+#### Pattern A — public JSON request
+
+Registration and recovery use direct `fetch` because no access JWT exists yet:
+
+```ts
+await fetch('/api/v1/auth/password/forgot', {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ email }),
+});
+```
+
+#### Pattern B — authenticated JSON request
+
+Pages use `apiFetch<T>` from `AuthProvider`. It attaches the in-memory access token, includes cookies, and performs one refresh-and-retry after a `401`:
+
+```ts
+const dashboard = await apiFetch<DashboardView>('/api/v1/learning/dashboard');
+```
+
+#### Pattern C — authenticated command with JSON
+
+```ts
+await apiFetch('/api/v1/exams/attempts/<attempt-id>/answers', {
+  method: 'PATCH',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ answers }),
+});
+```
+
+The server revalidates IDs and state. A TypeScript type improves the client but does not authorize the request.
+
+#### Pattern D — authenticated binary download
+
+Invoices and books use `apiDownload`, which returns a `Blob` instead of parsing JSON:
+
+```ts
+const pdf = await apiDownload('/api/v1/store/invoices/<invoice-id>/pdf');
+```
+
+The browser then creates a temporary object URL. Possessing the UUID is not permission; Spring checks ownership or ADMIN access.
+
+### 17.7 Complete API request lifecycle
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant Page as Next.js page
+    participant Client as fetch/apiFetch/apiDownload
+    participant Rewrite as Next.js rewrite
+    participant Correlation as CorrelationIdFilter
+    participant Security as Spring Security
+    participant Validation
+    participant Controller
+    participant Service
+    participant Repository
+    participant DB as PostgreSQL
+
+    User->>Page: Click or submit form
+    Page->>Client: Build request
+    Client->>Rewrite: Relative /api/v1 path
+    Rewrite->>Correlation: Forward to Spring
+    Correlation->>Correlation: Validate/create X-Request-ID
+    Correlation->>Security: Continue filter chain
+    Security->>Validation: Verify JWT/role for protected route
+    Validation->>Controller: Bind and validate input
+    Controller->>Service: Typed request
+    Service->>Repository: Business rules and transaction
+    Repository->>DB: Parameterized SQL
+    DB-->>Client: JSON, PDF, or ProblemDetail
+    Client-->>Page: Render success or safe error
+```
+
+### 17.8 Use an API safely with `curl`
+
+Read a public endpoint:
+
+```bash
+curl -i http://localhost:8080/api/v1/learning/curriculum
+```
+
+Send a public recovery request without revealing whether an account exists:
+
+```bash
+curl -i \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"student@example.test"}' \
+  http://localhost:8080/api/v1/auth/password/forgot
+```
+
+For protected endpoints, obtain a **local** access token from a login response, store it temporarily, use it, then remove it:
+
+```bash
+ENACADEMY_ACCESS_TOKEN='<local-token>'
+
+curl -i \
+  -H "Authorization: Bearer ${ENACADEMY_ACCESS_TOKEN}" \
+  http://localhost:8080/api/v1/exams
+
+unset ENACADEMY_ACCESS_TOKEN
+```
+
+Do not use `-v` casually with authentication because verbose output can expose headers and cookies in terminal history, logs, screenshots, or pasted bug reports.
+
+### 17.9 How to add a new API operation correctly
+
+1. Define the user outcome and authorization rule.
+2. Choose the HTTP method/path and request/response shape.
+3. Add Jakarta Validation to untrusted input.
+4. Add the controller only as an HTTP adapter.
+5. Put business rules and transaction boundaries in the service.
+6. Put parameterized SQL and mapping in the repository.
+7. Add database constraints/migration when a durable invariant changes.
+8. Return stable ProblemDetail codes for expected failures.
+9. Add the correct client pattern: direct fetch, `apiFetch`, or `apiDownload`.
+10. Add backend, frontend, and E2E coverage proportional to risk.
+11. Confirm the operation appears correctly in OpenAPI/Swagger.
+12. Update the API and security documentation.
+
+**Review questions**
+
+1. Why are database credentials not REST API tokens?
+2. Why does `apiFetch` retry only after refresh instead of retrying every failure?
+3. Why is an invoice UUID not authorization?
+4. When should a response be JSON and when should it be a `Blob`?
+5. Which layers must change when a new durable business invariant is introduced?
+
+---
+
+## 18. Security tokens — complete lifecycle and management guide
+
+“Token” means a value used as a compact reference, proof, or one-time capability. Tokens do not all have the same sensitivity, storage, or lifecycle.
+
+### 18.1 Security-token inventory
+
+| Token/value | Created by | Raw value location | Server storage | Default lifetime | End of lifecycle |
+|---|---|---|---|---|---|
+| Access JWT | `AuthService.createSession` | Login/refresh JSON; browser memory | Not stored as a row | 15 minutes | Expires; new one issued through refresh |
+| Refresh token | `AuthService.createSession` | HttpOnly `enacademy_refresh` cookie | SHA-256 hash in `refresh_tokens` | 14 days | Rotated on refresh, revoked on logout/reset, or expires |
+| Email verification token | Register/resend | One-time email link | SHA-256 hash in `email_verification_tokens` | 24 hours | Consumed once, replaced by resend, or expires |
+| Password-reset token | Forgot-password request | One-time email link | SHA-256 hash in `password_reset_tokens` | 60 minutes by default | Consumed once, replaced by new request, or expires |
+| Login rate key | `RateLimitService` | Never sent to user | Hashed Redis key/counter | 15-minute window | Cleared on successful login or TTL expiry |
+| Resend/reset rate keys | `RateLimitService` | Never sent to user | Hashed Redis key/counter | 15-minute window | TTL expiry |
+| Request ID | Client or `CorrelationIdFilter` | Header and safe error | Logging context, not auth DB | One request | Request completes; logs retain according to log policy |
+
+### 18.2 Access JWT lifecycle
+
+```mermaid
+stateDiagram-v2
+    [*] --> Issued: login or refresh
+    Issued --> Valid: signature, issuer, iat/exp accepted
+    Valid --> Authorized: route role plus service rules pass
+    Valid --> Forbidden: role/status/ownership/business rule fails
+    Issued --> Expired: 15 minutes by default
+    Expired --> [*]
+```
+
+The JWT contains:
+
+- `iss` — expected issuer;
+- `sub` — user UUID;
+- `role` — `STUDENT` or `ADMIN`;
+- `email` and `name` — session display claims;
+- `iat` and `exp` — issue and expiry times.
+
+It is signed with HS256. Spring verifies signature, issuer, and time before creating the authenticated principal. Services then reload authoritative account state where needed, so a suspended user cannot rely only on an older claim.
+
+The access JWT is kept in module memory, not `localStorage`. Reloading the page loses it and `AuthProvider` uses the refresh cookie to establish a new session.
+
+### 18.3 Refresh-token rotation lifecycle
+
+```mermaid
+sequenceDiagram
+    participant Browser
+    participant Auth as AuthController/AuthService
+    participant DB as refresh_tokens
+
+    Auth-->>Browser: Set HttpOnly SameSite=Strict refresh cookie
+    Browser->>Auth: POST /auth/refresh with cookie
+    Auth->>DB: Hash raw token, lock valid row
+    DB-->>Auth: User and expiry
+    Auth->>DB: Revoke consumed row
+    Auth->>DB: Insert hash of new random refresh token
+    Auth-->>Browser: New access JWT + replacement cookie
+```
+
+Cookie properties:
+
+- name: `enacademy_refresh`;
+- `HttpOnly`: JavaScript cannot read it;
+- `SameSite=Strict`: reduces cross-site sending;
+- path: `/api/v1/auth`;
+- max age: refresh lifetime;
+- `Secure`: false only for local HTTP, must be true with production HTTPS.
+
+Rotation means a refresh token is consumed once. Password reset revokes all refresh rows for the user. Logout revokes the current row and expires the browser cookie.
+
+### 18.4 Verification and reset-token lifecycle
+
+```mermaid
+flowchart LR
+    Request[Register/resend/forgot] --> Random[32-byte SecureRandom token]
+    Random --> Email[Raw token in one-time email link]
+    Random --> Hash[SHA-256 hash]
+    Hash --> DB[(PostgreSQL token table)]
+    Email --> Consume[User submits raw token]
+    Consume --> HashAgain[Hash submitted value]
+    HashAgain --> Lock[Find valid unused row FOR UPDATE]
+    Lock --> Mark[Mark used and perform action]
+    Mark --> Cleanup[Scheduled retention cleanup]
+```
+
+The raw random token cannot be reconstructed from its database hash. `FOR UPDATE` plus `used_at` prevents two simultaneous successful consumptions. A replacement request marks the prior unused token used before inserting a new hash.
+
+### 18.5 Cleanup lifecycle
+
+`TokenCleanupService` runs daily at `03:20 UTC` by default:
+
+- expired verification, refresh, and reset rows are removed;
+- used verification/reset rows and revoked refresh rows are retained for seven days by default, then removed;
+- only aggregate cleanup counts are logged;
+- user, audit, learning, commerce, and exam records are not token-cleanup targets.
+
+Expiry and cleanup solve different problems. Expiry makes a token unusable; cleanup removes no-longer-needed rows later.
+
+### 18.6 Values that are not authentication tokens
+
+| Value | Why it is not authentication |
+|---|---|
+| User, invoice, product, exam, question, or attempt UUID | Identifies a record; ownership/role must still be checked |
+| Lesson slug | Selects content; entitlement and sequence remain server rules |
+| `X-Request-ID` | Correlates diagnostics; proves no identity |
+| Redis rate-limit key | Tracks abuse window; grants no access |
+| CSP nonce | Authorizes one inline script under one response policy; it is not a user session |
+| CSS design token | A style variable such as `--paper`; it has no security meaning |
+
+### 18.7 Token safety rules
+
+- Never log raw passwords, JWTs, refresh cookies, or email-link tokens.
+- Never put access/refresh tokens into URLs; URLs leak through history and logs.
+- Never store the access JWT in `localStorage` without a deliberate security redesign.
+- Never store raw opaque session/email tokens in PostgreSQL; store one-way hashes.
+- Use cryptographic randomness for opaque tokens, not predictable UUID sequences or timestamps.
+- Validate signature, issuer, expiry, role, current account state, and resource authorization at their proper layers.
+- Rotate refresh tokens and revoke sessions after password reset.
+- Treat local Mailpit links as credentials while they are valid.
+- Replace development signing secrets before public production.
+
+**Review questions**
+
+1. Why is the access JWT signed but not stored in the token tables?
+2. Why are refresh and email tokens hashed before database storage?
+3. What is the difference between expiration, consumption, revocation, rotation, and cleanup?
+4. Why does knowing an attempt UUID not let another student submit it?
+5. Why is a CSP nonce called a token but not an authentication token?
+
+---
+
+## 19. Theme and design tokens — usage and preference lifecycle
+
+Theme tokens are CSS custom properties that carry visual meaning. They are unrelated to JWTs or login sessions.
+
+### 19.1 Three user preferences
+
+| Preference | Allowed values | HTML effect | Visual/behavioral result |
+|---|---|---|---|
+| Locale | `en`, `fa` | `lang` and `dir` | Translation lookup, English/Persian font, LTR/RTL layout |
+| Color mode | `light`, `dark` | `data-theme` | Surface/text/contrast token values |
+| Accent | `emerald`, `ocean`, `violet`, `sunset`, `rose` | `data-accent` | Brand/action/highlight palette values |
+
+They are saved together in browser `localStorage` under:
+
+```text
+enacademy.preferences
+```
+
+Example value:
+
+```json
+{
+  "locale": "fa",
+  "mode": "dark",
+  "accent": "ocean"
+}
+```
+
+This data contains display preferences, not identity or authorization. It is not synchronized to PostgreSQL and does not follow the user to another browser/device.
+
+### 19.2 Preference lifecycle
+
+```mermaid
+sequenceDiagram
+    participant HTML as Root layout
+    participant Early as Nonced early script
+    participant Storage as localStorage
+    participant Provider as PreferencesProvider
+    participant CSS as globals.css/product.css
+    participant UI as Preference controls/components
+
+    HTML->>HTML: Default en + LTR + light + emerald
+    Early->>Storage: Read enacademy.preferences before paint
+    Early->>HTML: Apply only validated saved attributes
+    Provider->>Storage: Restore validated state after mount
+    UI->>Provider: User changes locale/mode/accent
+    Provider->>HTML: Update lang, dir, data-theme, data-accent
+    Provider->>Storage: Persist preference object
+    HTML->>CSS: Attribute selectors choose token values
+    CSS-->>UI: Components consume semantic var(...) tokens
+```
+
+The early script reduces a bright-theme or wrong-direction flash before React hydrates. Its CSP nonce is generated for that response. `PreferencesProvider` then owns interactive state after the page mounts.
+
+Malformed or unknown saved values are ignored. This prevents an arbitrary stored string from becoming an uncontrolled attribute/class.
+
+### 19.3 Semantic design-token map
+
+| Token | Semantic job | Typical consumers |
+|---|---|---|
+| `--ink` | Primary text | Body, headings, controls |
+| `--muted` | Secondary text | Descriptions, metadata, hints |
+| `--paper` | Page background | Public, auth, dashboard, lesson shells |
+| `--panel` | Main raised surface | Cards, dialogs, sidebars, exam panels |
+| `--panel-soft` | Secondary/selected surface | Tabs, answer rows, progress backgrounds |
+| `--line` | Subtle borders/dividers | Cards, tables, inputs |
+| `--mint` | Primary accent | Highlights, status, decorative elements |
+| `--mint-dark` | Strong accent | Links, emphasized controls, focus/status text |
+| `--lime` | Bright highlight/action | Primary calls to action, rewards |
+| `--violet`, `--amber` | Supporting accents | Signals, warnings, illustrations |
+| `--deep` | Deep branded surface | Dark brand panels and gradients |
+| `--solid-bg`, `--solid-fg` | Solid button/logo background and foreground pair | Wordmark, solid actions |
+| `--accent-solid`, `--on-accent` | Accent surface and readable foreground pair | Accent icons/controls |
+| `--on-highlight` | Text on bright highlight | Main highlighted buttons |
+
+Components should consume semantic meaning, for example:
+
+```css
+.example-card {
+  color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--line);
+}
+```
+
+They should not copy one palette's hex values into every component. Central tokens let one mode/accent update the entire system and make contrast fixes consistent.
+
+### 19.4 How mode and accent combine
+
+The root light theme defines default semantic tokens. An accent selector changes brand values:
+
+```css
+html[data-accent="ocean"] {
+  --mint: #38bdf8;
+  --mint-dark: #0369a1;
+}
+```
+
+Dark mode changes surfaces/text and contrast relationships:
+
+```css
+html[data-theme="dark"] {
+  --ink: #edf7f2;
+  --paper: #08110e;
+  --panel: #101b17;
+}
+```
+
+Combined selectors adjust an accent specifically for dark surfaces:
+
+```css
+html[data-theme="dark"][data-accent="ocean"] {
+  --mint-dark: #7dd3fc;
+}
+```
+
+The browser performs the cascade. React does not calculate every component color.
+
+### 19.5 How to add a new themed component
+
+1. Decide the semantic roles: page, panel, text, muted text, border, accent, highlight.
+2. Use existing `var(--token)` values first.
+3. If a new semantic role is genuinely needed, define it in `:root`.
+4. Define its dark-mode value and any accent combinations that require different contrast.
+5. Test English and Persian, LTR and RTL, all five accents, light and dark modes.
+6. Test hover, focus, disabled, correct/wrong, warning, and error states.
+7. Avoid relying on color alone to communicate meaning.
+8. Add or update the theme contrast regression test.
+
+### 19.6 How to add a sixth accent safely
+
+A new accent is a cross-file contract:
+
+1. Add the literal to the `Accent` TypeScript union.
+2. Add it to the validated `accents` list in `PreferencesProvider`.
+3. Allow it in the early layout script's validated list.
+4. Add light CSS token overrides.
+5. Add dark+accent CSS overrides.
+6. Add palette-dot styling and translated label keys.
+7. Exercise persistence/restoration and invalid-value fallback.
+8. Run contrast, typography, layout, typecheck, build, and Playwright gates.
+
+Missing one validation list could make a value selectable during one visit but fail to restore on reload.
+
+### 19.7 Preference reset and lifecycle boundaries
+
+To reset only display preferences in a local browser console:
+
+```js
+localStorage.removeItem('enacademy.preferences');
+location.reload();
+```
+
+This does not log the user out or change server data. Conversely, logout does not remove the chosen theme because session and preference lifecycles are intentionally separate.
+
+Theme preferences currently have no account API, expiry, server cleanup, multi-device sync, or audit event. `localStorage` keeps them until the user/browser clears site data or code replaces the value.
+
+### 19.8 Theme and localization lessons you should remember
+
+- `lang` helps browsers and assistive technology understand the document language.
+- `dir` controls layout direction; translating text without switching direction is incomplete Persian support.
+- Fonts are part of readability, not only decoration.
+- Dark mode requires explicit contrast review; inverting colors mechanically is not enough.
+- Accent palettes must preserve readable foreground/background pairs.
+- CSP nonce lifecycle protects the early script; localStorage preference lifecycle restores appearance; neither authenticates a user.
+- Fixed controls must be tested against lesson navigation and mobile layouts so they do not overlap actions.
+- Server-rendered defaults plus validated early restoration reduce hydration mismatch and visual flash.
+
+### 19.9 Practical theme exercise
+
+1. Open DevTools and inspect `<html>`.
+2. Change mode and accent through the UI; watch `data-theme` and `data-accent` change.
+3. Switch Persian/English; watch `lang` and `dir` change.
+4. Inspect `localStorage['enacademy.preferences']`.
+5. Reload and confirm the early script restores the selection.
+6. Temporarily inspect a card's computed `--panel`, `--ink`, and `--line` values.
+7. Clear only the preference key and confirm default `en/light/emerald` returns.
+8. Confirm the authenticated session remains independent from the appearance reset.
+
+**Review questions**
+
+1. What is the difference between a CSS design token, CSP nonce, and access JWT?
+2. Why does the project validate stored preference values before applying them?
+3. Why are semantic names like `--panel` better than repeating one hex value?
+4. Which files must change to add an accent?
+5. Why does logout preserve the theme?
+6. What must be tested beyond simply seeing that dark mode looks darker?
+
+---
+
+## 20. Combined API, security-token, and theme-token mental model
+
+```mermaid
+flowchart TB
+    User[User action] --> Choice{What kind of state?}
+    Choice -->|Business or identity| API[Spring REST API]
+    API --> Security[JWT/cookie/email-token lifecycle]
+    Security --> DB[(PostgreSQL authoritative state)]
+    Choice -->|Display preference| Theme[PreferencesProvider]
+    Theme --> Local[Browser localStorage]
+    Theme --> Attr[HTML lang/dir/data attributes]
+    Attr --> CSS[Semantic CSS design tokens]
+    Choice -->|Diagnostics| RequestId[X-Request-ID]
+    RequestId --> Logs[Structured logs]
+```
+
+Use this decision rule:
+
+- If the value grants access or changes durable business state, the server must validate it.
+- If the value only changes appearance on one browser, validated local preference state is appropriate.
+- If the value connects one error to one log entry, it is correlation metadata—not identity.
+- If the value names a database record, it still requires authentication, role, ownership, and business-rule checks.
+
+**Final success check:** you can trace an API request, an access/refresh/email token, a CSP nonce, a request ID, and a CSS design token through their separate creators, transports, storage locations, validation rules, expiry/cleanup behavior, and consumers without treating one as another.
