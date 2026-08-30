@@ -2,6 +2,8 @@
 
 This guide teaches Swagger/OpenAPI and the other engineering tools that are actually connected to ENAcademy. It explains the job of each tool, why it exists, where it is configured, how it participates in a real request, how to inspect it safely, and what it does **not** do.
 
+For a standalone, deeper course focused only on HTTP APIs, REST, OpenAPI, Swagger UI, Springdoc, authentication, tokens, testing, and troubleshooting, see [`swagger-api-guide.md`](swagger-api-guide.md).
+
 The guide assumes the local Docker application is started with:
 
 ```bash
@@ -129,7 +131,7 @@ springdoc:
   swagger-ui.path: /docs
 ```
 
-[`SecurityConfig.java`](../backend/src/main/java/com/enacademy/config/SecurityConfig.java) allows local public access to `/docs/**` and `/v3/api-docs/**`.
+[`SecurityConfig.java`](../backend/src/main/java/com/enacademy/config/SecurityConfig.java) allows local public access to `/docs`, `/docs/**`, `/swagger-ui.html`, `/swagger-ui/**`, and `/v3/api-docs/**`. Both the friendly redirect and the underlying UI assets must be allowed.
 
 Springdoc learns the contract from:
 

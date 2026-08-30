@@ -22,6 +22,19 @@ test('account recovery exposes reset and verification resend without revealing a
   assert.match(reset,/password!==confirmation/);
 });
 
+test('async recovery forms keep a stable form reference across API requests',()=>{
+  for(const path of [
+    'app/forgot-password/page.tsx',
+    'app/resend-verification/page.tsx',
+    'app/reset-password/page.tsx',
+  ]){
+    const source=read(path);
+    assert.match(source,/const form=event\.currentTarget/);
+    assert.doesNotMatch(source,/await [^;]+;[^}]*event\.currentTarget\.reset\(\)/);
+    assert.match(source,/await [^;]+;[^}]*form\.reset\(\)/);
+  }
+});
+
 test('frontend responses use nonce-based CSP and defensive browser headers',()=>{
   const proxy=read('proxy.ts');
   const layout=read('app/layout.tsx');

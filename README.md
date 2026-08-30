@@ -151,6 +151,7 @@ The report prints p50/p95/max latency and fails if any learner cannot login, sta
 frontend/                  Next.js application and automated UI regressions
 backend/                   Spring Boot API, tests, Flyway migrations, fonts, and protected books
 docs/system-guide.md       Complete architecture, workflows, diagrams, decisions, security, and operations
+docs/swagger-api-guide.md  Standalone Swagger, OpenAPI, REST, security, and API teaching guide
 docs/database.md           Database tables, relationships, persistence, backups, and inspection
 docs/architecture.md       Focused architecture summary
 docs/security.md           Security model and production checklist
@@ -164,6 +165,7 @@ start-app.sh / stop-app.sh Friendly lifecycle commands
 
 - [Complete system and teaching guide](docs/system-guide.md) — all product workflows, diagrams, APIs, tokens, themes, data, security, decisions, and operations, followed by a guided lesson and exercises for each of its 20 major topics
 - [Platform tools teaching guide](docs/platform-tools-guide.md) — practical lessons for Swagger/OpenAPI, Actuator, Flyway, PostgreSQL, Redis, Mailpit, JWT, Docker, testing, CI, browser APIs, and observability
+- [Swagger and API teaching guide](docs/swagger-api-guide.md) — standalone lessons for HTTP, REST, OpenAPI, Swagger UI, Springdoc, endpoints, validation, errors, authentication, tokens, testing, and troubleshooting
 - [Database guide](docs/database.md) — what is stored, where it lives, how tables relate, and how to inspect or back it up
 - [Architecture](docs/architecture.md) — concise component and deployment view
 - [Security](docs/security.md) — authentication, authorization, secrets, headers, and deployment checklist
