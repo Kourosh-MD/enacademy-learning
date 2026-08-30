@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 const appUrl=(process.env.E2E_BASE_URL??'http://localhost:3000').replace(/\/$/,'');
+const apiUrl=(process.env.E2E_API_URL??'http://localhost:8080').replace(/\/$/,'');
 const mailpitUrl=(process.env.MAILPIT_URL??'http://localhost:8025').replace(/\/$/,'');
 const adminEmail=process.env.APP_ADMIN_EMAIL??'admin@enacademy.local';
 const adminPassword=process.env.APP_ADMIN_PASSWORD??'ChangeMe123!';
@@ -43,6 +44,16 @@ test('registration, resend, approval, recovery, purchase, lesson completion, and
   const oldPassword='OldStrongPass2026';
   const newPassword='NewStrongPass2026';
 
+  const swaggerUi=await request.get(`${apiUrl}/swagger-ui/index.html`);
+  expect(swaggerUi.ok()).toBeTruthy();
+  expect(swaggerUi.headers()['content-type']).toContain('text/html');
+  const openApi=await request.get(`${apiUrl}/v3/api-docs`);
+  expect(openApi.ok()).toBeTruthy();
+  expect((await openApi.json()).openapi).toBeTruthy();
+  await page.goto(`${apiUrl}/docs`);
+  await expect(page.locator('.swagger-ui').first()).toBeVisible();
+  await expect(page.locator('.opblock-tag').first()).toBeVisible();
+
   const loginResponse=await page.goto('/login');
   expect(loginResponse?.headers()['content-security-policy']).toContain("script-src 'self' 'nonce-");
   expect(loginResponse?.headers()['x-frame-options']).toBe('DENY');
@@ -56,9 +67,12 @@ test('registration, resend, approval, recovery, purchase, lesson completion, and
   await expect(page.getByRole('status')).toContainText('Account created');
 
   await page.goto('/resend-verification');
-  await page.locator('input[name="email"]').fill(email);
+  const resendEmail=page.locator('input[name="email"]');
+  await resendEmail.fill(email);
   await page.getByRole('button',{name:'Send verification email'}).click();
   await expect(page.getByRole('status')).toContainText('new email has been sent');
+  await expect(resendEmail).toHaveValue('');
+  await expect(page.locator('.form-message.error')).toHaveCount(0);
   const verificationMail=await latestMailText(request,'/verify');
   const verificationToken=tokenFrom(verificationMail,'/verify');
 
@@ -82,9 +96,12 @@ test('registration, resend, approval, recovery, purchase, lesson completion, and
   await expect(page).toHaveURL(/\/dashboard$/);
 
   await page.goto('/forgot-password');
-  await page.locator('input[name="email"]').fill(email);
+  const recoveryEmail=page.locator('input[name="email"]');
+  await recoveryEmail.fill(email);
   await page.getByRole('button',{name:'Send reset link'}).click();
   await expect(page.getByRole('status')).toContainText('reset email has been sent');
+  await expect(recoveryEmail).toHaveValue('');
+  await expect(page.locator('.form-message.error')).toHaveCount(0);
   const resetMail=await latestMailText(request,'/reset-password');
   const resetToken=tokenFrom(resetMail,'/reset-password');
   await page.goto(`/reset-password?token=${resetToken}`);
@@ -92,6 +109,13 @@ test('registration, resend, approval, recovery, purchase, lesson completion, and
   await page.locator('input[name="confirmation"]').fill(newPassword);
   await page.getByRole('button',{name:'Change password'}).click();
   await expect(page.getByRole('heading',{name:'Your password has changed.'})).toBeVisible();
+
+  const revokedSession=await page.request.post(`${appUrl}/api/v1/auth/refresh`);
+  expect(revokedSession.status()).toBe(401);
+  const reusedReset=await request.post(`${appUrl}/api/v1/auth/password/reset`,{
+    data:{token:resetToken,password:newPassword},
+  });
+  expect(reusedReset.status()).toBe(400);
 
   const oldLogin=await request.post(`${appUrl}/api/v1/auth/login`,{data:{email,password:oldPassword}});
   expect(oldLogin.status()).toBe(401);

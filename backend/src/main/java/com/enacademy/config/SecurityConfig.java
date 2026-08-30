@@ -71,7 +71,8 @@ public class SecurityConfig {
                 .requestMatchers("/api/v1/auth/register", "/api/v1/auth/verify", "/api/v1/auth/login",
                     "/api/v1/auth/refresh", "/api/v1/auth/logout", "/api/v1/auth/verification/resend",
                     "/api/v1/auth/password/forgot", "/api/v1/auth/password/reset", "/error",
-                    "/actuator/health/**", "/docs/**", "/v3/api-docs/**").permitAll()
+                    "/actuator/health/**", "/docs", "/docs/**", "/swagger-ui.html", "/swagger-ui/**",
+                    "/v3/api-docs/**").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/v1/learning/curriculum").permitAll()
                 .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
                 .anyRequest().authenticated())

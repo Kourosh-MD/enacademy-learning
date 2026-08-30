@@ -2017,6 +2017,7 @@ ENAcademy/
 
 - [README](../README.md)
 - [Platform tools teaching guide](platform-tools-guide.md)
+- [Swagger and API teaching guide](swagger-api-guide.md)
 - [Architecture summary](architecture.md)
 - [Database operations](database.md)
 - [Online exams and 100-user capacity](exam-capacity.md)
