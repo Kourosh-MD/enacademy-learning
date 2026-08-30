@@ -2016,6 +2016,7 @@ ENAcademy/
 ## Related documents
 
 - [README](../README.md)
+- [Platform tools teaching guide](platform-tools-guide.md)
 - [Architecture summary](architecture.md)
 - [Database operations](database.md)
 - [Online exams and 100-user capacity](exam-capacity.md)
@@ -2025,3 +2026,104 @@ ENAcademy/
 ---
 
 Update this guide whenever a service, trust boundary, database table, authentication rule, deployment dependency, or major learning workflow changes. Documentation is part of the system. If it disagrees with the code, the code is current behavior and the guide must be corrected in the same change.
+
+---
+
+## Appendix A — additive implementation and teaching record
+
+This appendix was added after the main guide was completed. It preserves every earlier use case, workflow, diagram, and teaching section and records what was built during the latest development phase.
+
+### A.1 The requested outcome
+
+The platform was expected to become a realistic bilingual learning application rather than only a visual demonstration. Students needed self-registration followed by administrator approval, a functional learning path, simulated commerce and invoices, timed online exams, Docker operation, documented data/workflows, and a production-minded security/testing foundation. The application also needed a measurable design target for 100 students logging in and taking exams together.
+
+### A.2 What the implementation now contains
+
+1. **Identity and admission:** registration, field validation, email verification, verification resend, administrator approval, login, rotating refresh sessions, password reset, logout, suspension, and restoration.
+2. **Learning:** A1/A2 course entitlements, ordered lessons, durable progress, XP, saved vocabulary, listening, knowledge checks, and speaking practice.
+3. **Bilingual experience:** English/Persian UI, LTR/RTL direction, appropriate Latin/Persian fonts, light/dark mode, and selectable accent palettes positioned so they do not cover lesson controls.
+4. **Beta commerce:** toman products, preview checkout, automatic course/book entitlements, downloadable protected books, purchase history, admin commerce views, and one Persian PDF invoice for each successful purchase.
+5. **Online exams:** seeded bilingual exams, publishing/scheduling, eligibility, durable timing, autosave, final submission, server grading, result review, and administrator attempt reporting.
+6. **Operations:** Docker Compose, PostgreSQL, Redis, Mailpit, health checks, Flyway migrations, non-root images, environment configuration, and safe start/stop scripts.
+7. **Engineering evidence:** backend integration tests, frontend regression tests, a 100-user load harness, Playwright full-lifecycle testing, and GitHub Actions gates.
+8. **Documentation:** architecture, database, security, capacity, API/token/theme linkage, workflows, technical decisions, repository navigation, and teaching exercises.
+
+### A.3 The eight security and production titles
+
+| Title | Decision | Teaching point |
+|---|---|---|
+| Replace all development secrets | Skipped by request | Development convenience values must never be confused with production secret management. |
+| Deploy behind HTTPS | Postponed until a host/domain exists | Correct TLS design depends on the real proxy, forwarding, origin, cookie, and certificate topology. |
+| Add CSP and security headers | Implemented | Browser defense is layered across content loading, framing, MIME handling, referrers, permissions, and origin isolation. |
+| Add password reset and verification resend | Implemented | Recovery must resist account enumeration, token theft/reuse, brute force, and stale sessions. |
+| Add scheduled token cleanup | Implemented | Expiry prevents use; retention cleanup controls unnecessary database growth and exposure. |
+| Add structured logs and request correlation | Implemented | A safe identifier connects user-visible errors to operational evidence without exposing credentials. |
+| Add end-to-end workflow tests | Implemented | Unit/build success is not enough; the deployed components must complete the real multi-role lifecycle together. |
+| Add dependency, secret, and image scanning | Skipped by request | Scanning is a separate supply-chain control and should be added before public production/open-source maturity. |
+
+### A.4 End-to-end state journey
+
+```mermaid
+stateDiagram-v2
+    [*] --> Registered
+    Registered --> EmailVerified: consume verification token
+    EmailVerified --> Approved: administrator approves
+    Approved --> Learning: login and own course
+    Learning --> Purchased: simulated checkout
+    Purchased --> Learning: course/book entitlement delivered
+    Learning --> ExamActive: start eligible published exam
+    ExamActive --> ExamActive: autosave valid answers
+    ExamActive --> ExamFinal: submit or server auto-submit
+    Approved --> PasswordReset: request one-time email link
+    PasswordReset --> Approved: change password and revoke sessions
+    Approved --> Suspended: administrator suspends
+    Suspended --> Approved: administrator restores
+```
+
+Every arrow is enforced by Spring and persisted or checked through PostgreSQL. Browser navigation and button visibility help the user but do not authorize the transition.
+
+### A.5 Why the 100-user design uses bounded resources
+
+Supporting 100 concurrent students does not mean opening 100 database connections. The request layer may accept many connections while the bounded Hikari pool admits a controlled number of database operations. Indexed, short transactions finish and release connections; queued requests wait briefly rather than overwhelming PostgreSQL. Batched answer saves, one aggregate grade query, debouncing, durable deadlines, and idempotent operations reduce both request count and retry risk.
+
+The provided load harness makes the target measurable, but the deployment hardware still determines capacity. A production claim requires rerunning the exact workflow on the chosen host while monitoring latency, errors, CPU, memory, pool waits, database I/O, and restarts.
+
+### A.6 Verification record
+
+- Maven backend compilation/test preparation passed, and GitHub independently ran the Spring test suite.
+- Frontend lint, TypeScript validation, production build, and 22 source tests passed.
+- Docker Compose validation and production image builds passed.
+- The complete local stack reached healthy state.
+- Playwright passed registration, resend, verification, approval, login, reset, purchase, invoice, lesson completion, suspension, protected-access denial, and CSP/header checks.
+- GitHub Actions independently repeated backend, frontend, container, and complete browser checks successfully.
+- Temporary E2E database records were deleted after the local proof; normal application data was not modified.
+
+### A.7 Repository tracing exercise
+
+Use one workflow—password reset or exam submission—and trace it through every layer:
+
+1. Find the public page or student screen in `frontend/app`.
+2. Find the shared browser request/session behavior in `frontend/components` or `frontend/lib`.
+3. Follow the request into the matching Spring controller.
+4. Identify validation, authentication, authorization, and rate-limit checks.
+5. Find the service transaction and repository SQL.
+6. Locate the Flyway migration, table constraint, and index that protect the persisted fact.
+7. Locate the unit/integration, source-regression, Playwright, or load test that proves the behavior.
+8. Find the documentation section that describes its operational or security limits.
+
+**Success check.** You can explain which component presents the workflow, which component authorizes it, which database rule protects it under concurrency, and which automated evidence detects a regression.
+
+### A.8 Review questions
+
+1. Why is administrator approval separate from email verification?
+2. Why are access JWTs short-lived while refresh tokens are stored only as hashes and rotated?
+3. Why does password reset revoke every refresh session?
+4. Why does exam autosave use a batch upsert and submission use a row lock?
+5. Why is a passing local 100-user test not a universal production guarantee?
+6. Which five hardening items are implemented, which two were skipped, and which one is postponed?
+7. What information is still required before implementing HTTPS correctly?
+8. Why are GitHub Actions and Playwright useful even after all local tests pass?
+
+### A.9 Recommended next phase
+
+When a real deployment target is selected, replace all secrets, design HTTPS for the actual host/domain, add dependency/secret/image scanning, configure managed PostgreSQL backups and restore drills, protect production Redis/SMTP, add centralized monitoring and alerts, and rerun the 100-user workload on deployment-sized infrastructure. Those tasks extend the current platform; they should not be described as complete until their real environment evidence exists.
