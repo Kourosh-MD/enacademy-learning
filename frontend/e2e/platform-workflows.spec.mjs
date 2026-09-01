@@ -49,10 +49,19 @@ test('registration, resend, approval, recovery, purchase, lesson completion, and
   expect(swaggerUi.headers()['content-type']).toContain('text/html');
   const openApi=await request.get(`${apiUrl}/v3/api-docs`);
   expect(openApi.ok()).toBeTruthy();
-  expect((await openApi.json()).openapi).toBeTruthy();
+  const openApiDocument=await openApi.json();
+  expect(openApiDocument.openapi).toBeTruthy();
+  expect(openApiDocument.info.title).toBe('ENAcademy API');
+  expect(openApiDocument.components.securitySchemes.bearerAuth.scheme).toBe('bearer');
+  expect(openApiDocument.components.securitySchemes.refreshCookie.in).toBe('cookie');
+  expect(openApiDocument.paths['/api/v1/auth/register'].post.summary).toBe('Register a student');
+  expect(openApiDocument.paths['/api/v1/learning/dashboard'].get.security)
+    .toContainEqual({bearerAuth:[]});
+  expect(openApiDocument.paths['/api/v1/learning/curriculum'].get.security??[]).toHaveLength(0);
   await page.goto(`${apiUrl}/docs`);
   await expect(page.locator('.swagger-ui').first()).toBeVisible();
   await expect(page.locator('.opblock-tag').first()).toBeVisible();
+  await expect(page.getByRole('button',{name:/Authorize/})).toBeVisible();
 
   const loginResponse=await page.goto('/login');
   expect(loginResponse?.headers()['content-security-policy']).toContain("script-src 'self' 'nonce-");

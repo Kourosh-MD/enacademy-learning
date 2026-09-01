@@ -52,7 +52,14 @@ management:
   endpoint.health.probes.enabled: true
 
 springdoc:
-  swagger-ui.path: /docs
+  swagger-ui:
+    path: /docs
+    display-request-duration: true
+    operations-sorter: method
+    tags-sorter: alpha
+    filter: true
+    persist-authorization: false
+    doc-expansion: none
 
 logging:
   structured:
