@@ -12,6 +12,7 @@ import com.enacademy.domain.UserStatus;
 import com.enacademy.exam.ExamRepository;
 import com.enacademy.learning.LearningRepository;
 import com.enacademy.shared.ApiException;
+import io.swagger.v3.oas.models.OpenAPI;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
@@ -46,6 +47,19 @@ class EnacademyApiApplicationTests {
     @Autowired AuthService auth;
     @Autowired TokenRepository tokens;
     @Autowired PasswordEncoder passwordEncoder;
+    @Autowired OpenAPI openApi;
+
+    @Test
+    void openApiTeachesTheContractAndAuthenticationSchemes() {
+        assertThat(openApi.getInfo().getTitle()).isEqualTo("ENAcademy API");
+        assertThat(openApi.getInfo().getVersion()).isEqualTo("1.0.0");
+        assertThat(openApi.getTags()).extracting(tag->tag.getName())
+            .containsExactly("Authentication","Learning","Commerce","Exams","Administration");
+        assertThat(openApi.getComponents().getSecuritySchemes())
+            .containsKeys("bearerAuth","refreshCookie");
+        assertThat(openApi.getComponents().getSecuritySchemes().get("bearerAuth").getScheme())
+            .isEqualTo("bearer");
+    }
 
     @Test
     void migrationsSeedTheFullCurriculumAndBootstrapTheAdmin() {

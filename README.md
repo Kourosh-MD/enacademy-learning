@@ -165,7 +165,7 @@ start-app.sh / stop-app.sh Friendly lifecycle commands
 
 - [Complete system and teaching guide](docs/system-guide.md) — all product workflows, diagrams, APIs, tokens, themes, data, security, decisions, and operations, followed by a guided lesson and exercises for each of its 20 major topics
 - [Platform tools teaching guide](docs/platform-tools-guide.md) — practical lessons for Swagger/OpenAPI, Actuator, Flyway, PostgreSQL, Redis, Mailpit, JWT, Docker, testing, CI, browser APIs, and observability
-- [Swagger and API teaching guide](docs/swagger-api-guide.md) — standalone lessons for HTTP, REST, OpenAPI, Swagger UI, Springdoc, endpoints, validation, errors, authentication, tokens, testing, and troubleshooting
+- [Swagger and API teaching guide](docs/swagger-api-guide.md) — a complete route-design and API curriculum covering HTTP, REST, OpenAPI, live Swagger authorization, every ENAcademy route, DTOs, validation, errors, tokens, ownership, idempotency, concurrency, pagination, compatibility, versioning, testing, and troubleshooting
 - [Database guide](docs/database.md) — what is stored, where it lives, how tables relate, and how to inspect or back it up
 - [Architecture](docs/architecture.md) — concise component and deployment view
 - [Security](docs/security.md) — authentication, authorization, secrets, headers, and deployment checklist
