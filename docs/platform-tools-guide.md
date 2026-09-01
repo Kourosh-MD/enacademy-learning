@@ -196,9 +196,9 @@ Do not commit generated API output unless the project deliberately adopts a cont
 
 ### 1.6 Authentication and the current Swagger limitation
 
-ENAcademy protects most endpoints with bearer access JWTs. The current code does not declare an OpenAPI bearer `securityScheme`, so Swagger UI documents the operations but does not provide the normal global **Authorize** button. This is a documentation-integration limitation, not an authentication bypass.
+ENAcademy protects most endpoints with bearer access JWTs. `OpenApiConfig` declares `bearerAuth` and `refreshCookie` security schemes, while controller annotations mark only the operations that use them. Swagger UI therefore provides the global **Authorize** button and meaningful lock icons. These declarations document the credentials; Spring Security still performs the enforcement.
 
-Public operations can be executed directly in Swagger UI. For a protected operation, use the web application or obtain a local token through login and call the API with `curl`:
+Public operations can be executed directly in Swagger UI. For a protected operation, execute local login, copy the returned `accessToken`, select **Authorize**, and paste only the token value. The equivalent terminal workflow is:
 
 ```bash
 curl -i \
@@ -219,7 +219,7 @@ curl -i \
 unset ENACADEMY_ACCESS_TOKEN
 ```
 
-Never put the token in command history on a shared or production machine. A future OpenAPI improvement can add a bearer scheme and operation security declarations, but it must still preserve real Spring Security enforcement.
+Never put the token in command history on a shared or production machine. Swagger authorization is for local exploration and must never replace real Spring Security enforcement.
 
 ### 1.7 What Swagger/OpenAPI does not guarantee
 
